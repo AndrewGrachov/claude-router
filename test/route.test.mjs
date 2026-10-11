@@ -9,6 +9,7 @@ import {
   isModelAllowed,
   isNativeFallback,
   nativeFacts,
+  observedMove,
   observeResponse,
   prepareLoop,
   resetHistory,
@@ -477,4 +478,79 @@ test("a route the context outgrows moves up the activity's routes; an unknown co
     );
     assert.deepEqual([decision.tier, decision.activity, decision.reason, decision.model], expected, name);
   }
+});
+
+test('a turn moves up to the route its own tool calls show, never down, and not when pinned or off', () => {
+  const on = loadConfig({ userFile: {} });
+  const off = loadConfig({ userFile: { activityRouting: 'off' } });
+  const routed = (config, activity, pinned = false) => ({
+    ...emptyLoop(config, model),
+    lastRoute: 'medium',
+    lastActivity: activity,
+    decision: { tier: 'medium', activity, model, effort: 'high', reason: 'activity-down', pinned },
+  });
+  for (const [name, config, loop, observed, expected] of [
+    ['ops edits code', on, routed(on, 'ops'), 'code', ['code', 'claude-opus-5-5', 'medium', 'activity-up']],
+    ['ops only runs commands', on, routed(on, 'ops'), 'ops', ['ops', model, 'high', 'activity-down']],
+    ['ops only reads', on, routed(on, 'ops'), 'read', ['ops', model, 'high', 'activity-down']],
+    ['pinned turn', on, routed(on, 'ops', true), 'code', ['ops', model, 'high', 'activity-down']],
+    ['activity routing off', off, routed(off, 'ops'), 'code', ['ops', model, 'high', 'activity-down']],
+  ]) {
+    const facts = nativeFacts(config, loop, context);
+    const { decision } = observedMove(config, loop, { observed, facts, contextKnown: true, now });
+    assert.deepEqual([decision.activity, decision.model, decision.effort, decision.reason], expected, name);
+  }
+});
+
+test('an observed move to a smaller window waits for a measured context, as a routed turn does', () => {
+  const config = loadConfig({ userFile: { models: { tiny }, activities: { code: { medium: { model: 'tiny' } } } } });
+  const loop = {
+    ...emptyLoop(config, model),
+    lastRoute: 'medium',
+    lastActivity: 'ops',
+    decision: { tier: 'medium', activity: 'ops', model, effort: 'high', reason: 'activity-down', pinned: false },
+  };
+  const facts = nativeFacts(config, loop, context);
+  for (const [name, contextKnown, measured, expected] of [
+    ['measured', true, true, 'claude-haiku-4-5'],
+    ['context unknown', false, true, model],
+    ['history not measured', true, false, model],
+  ]) {
+    const { decision } = observedMove(
+      config,
+      { ...loop, historyMeasured: measured },
+      { observed: 'code', facts, contextKnown, now },
+    );
+    assert.equal(decision.model, expected, name);
+  }
+});
+
+test('the first response a loop serves starts the dwell and the verification window', () => {
+  const initial = { ...emptyLoop(DEFAULTS, model), lastMessageCount: 40 };
+  const first = observeResponse(DEFAULTS, initial, { usage: usage(), requestedModel: model, effort: 'high', now });
+  assert.deepEqual(first.switchedAt, { requests: 1, messageCount: 40 });
+  const same = observeResponse(
+    DEFAULTS,
+    { ...first, lastMessageCount: 42 },
+    { usage: usage(), requestedModel: model, effort: 'high', now },
+  );
+  assert.deepEqual(same.switchedAt, { requests: 1, messageCount: 40 });
+});
+
+test('a shortened history moves the checkpoint and edit cursors to its end and keeps the dwell', () => {
+  const loop = {
+    ...emptyLoop(DEFAULTS, model),
+    lastMessageCount: 200,
+    requests: 30,
+    switchedAt: { requests: 25, messageCount: 180 },
+    observedFrom: 190,
+  };
+  for (const [name, count, expected] of [
+    ['compaction', 20, [{ requests: 25, messageCount: 20 }, 20]],
+    ['growth', 210, [{ requests: 25, messageCount: 180 }, 190]],
+  ]) {
+    const next = prepareLoop(loop, count);
+    assert.deepEqual([next.switchedAt, next.observedFrom], expected, name);
+  }
+  assert.equal(prepareLoop({ ...loop, switchedAt: null }, 20).switchedAt, null);
 });

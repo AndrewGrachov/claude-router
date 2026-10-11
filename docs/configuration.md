@@ -70,7 +70,7 @@ The classifier also names the activity of a turn: what the turn produces. `activ
 
 A `router.json` that still sets `"shadow"`, a mode removed in 1.10.1, is read as not setting it: the default, `on`, runs, and the next save from the pane drops the value.
 
-The seven activities are `code`, `debug`, `explore`, `plan`, `review`, `ops`, and `docs`. The classifier may also answer `uncertain`. In `on`, an activity applies only when its probability is at least `policy.activityMass`. Below that, or on `uncertain`, a new task goes back to its base route if the move passes the cache checks; a continuation of the running task keeps its activity, or moves to the classifier's activity when that route is stronger. When the classifier gives no usable activity answer, the running activity stays and the tier answer still applies. When it gives no answer at all, the running route stays. In `off`, the base route runs.
+The seven activities are `code`, `debug`, `explore`, `plan`, `review`, `ops`, and `docs`. The classifier may also answer `uncertain`. In `on`, an activity applies only when its probability is at least `policy.activityMass`. Below that, or on `uncertain`, a new task goes back to its base route if the move passes the cache checks. On the running task the activity can move either way during the turn; see [Changes during a task](user-guide.md#changes-during-a-task). When the classifier gives no usable activity answer, the running activity stays and the tier answer still applies. When it gives no answer at all, the running route stays. In `off`, the base route runs.
 
 `activities` maps an activity to a tier to a route override. An override may set `model`, `effort`, or both. A field it leaves out comes from the built-in override for that cell, or from the tier's own route, the **base route**, where there is none:
 
@@ -267,14 +267,16 @@ Policy defaults:
 | `upgradePivotUsd`       |   `0.5` | Cost scale used by the upgrade bar. Must be positive.                                              |
 | `jumpConfidence`        |  `0.95` | Support for a two-tier jump without waiting for votes.                                             |
 | `downgradeVotes`        |     `2` | Consecutive supporting votes before a downgrade; one before a history's first measured reply.      |
-| `downgradeMass`         |   `0.9` | Minimum probability mass required for a downgrade.                                                 |
+| `downgradeMass`         |   `0.9` | Minimum probability mass at or below the target tier required for a downgrade.                     |
 | `downgradeSlope`        |  `0.08` | Maximum increase to the downgrade bar from estimated switching cost.                               |
 | `downgradePivotUsd`     |   `0.5` | Cost scale used by the downgrade bar. Must be positive.                                            |
 | `downgradeHorizonTurns` |     `5` | Later turns included in a downgrade payback estimate.                                              |
-| `continuationMass`      |   `0.7` | Advice probability that keeps the current route for a continuation.                                |
-| `escalationHoldTurns`   |     `2` | Turns held after a repeated tool error escalates the route.                                        |
+| `continuationMass`      |   `0.7` | Advice probability at which a new prompt counts as the running task, not a new one.                |
+| `escalationHoldTurns`   |     `2` | Decisions held after a repeated tool error escalates the route; each turn and in-turn review counts. |
 | `cashCapUsd`            |     `2` | Maximum estimated cold cache write for a `credits` model. It does not cap output or session spend. |
 | `activityMass`          |   `0.6` | Minimum probability for the classifier's activity to apply. Not tuned on any classifier.           |
+| `reviewEveryRequests`   |     `4` | Requests between classifier reviews inside a turn; `0` turns them off. Not tuned.                  |
+| `minDwellRequests`      |     `8` | Requests after a model change before a cheaper route on the same task. Not tuned.                  |
 
 The pane writes a subset of these settings. The **Routes** and **Policy** tabs set `routes`, `activities`, `activityRouting`, `baselineTier`, `policy.downgradeVotes`, `policy.downgradeHorizonTurns`, `policy.cashCapUsd`, and `policy.activityMass` in one save: it writes only values that differ from the defaults and removes the rest. `/router activities <mode>` writes `activityRouting` at once, with **Undo**. The **Classifier** tab sets `classifier` and the active classifier's `timeoutMs` at once. **Undo** reverts the settings the last pane write changed. Each save validates the whole file, keeps other keys, and applies from the next turn. A failed check names the setting and leaves the file unchanged. The pane refuses to write through a symlink. Model aliases and the other settings require a direct edit.
 

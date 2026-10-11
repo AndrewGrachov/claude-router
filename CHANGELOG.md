@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+The route now follows the task while it runs, for the tier and the activity, in both directions. Before, a turn was
+routed once, from its prompt, and a continuation prompt could only keep the route. A team worker whose `/goal` brief
+read as `ops` ran on Haiku · high and kept it for 100+ requests of coding. See
+[Changes during a task](docs/user-guide.md#changes-during-a-task).
+
+### Added
+
+- A turn whose own tool calls edit a code file moves at once to the tier's `code` route (`docs` for doc-only edits), shown as `↗ coding` with a toast. The tools are the evidence, so no classifier support is needed and the cache cost does not hold the move back; only the cash cap on a credits-billed model can, priced at the route the context fits. It only goes up and skips pinned turns and `activityRouting: off`.
+- Classifier reviews inside a turn: every `policy.reviewEveryRequests` requests (default 4; `0` turns them off) the classifier is asked again in the background, with the turn's prompt and recent dialogue. A step never waits; the answer applies at the next step and can move the tier or the activity either way. Each review sends the classifier the same kind of text a new turn does.
+- `policy.minDwellRequests` (default 8) and a checkpoint for cheaper routes on the running task: a downgrade or a cheaper activity waits for that many requests after the last model change and for the last test, build, lint or type-check command since then to pass. Until then the route stays: a tier shows `… down after a passed check` (reason `downgrade-held`), a held activity keeps the running one. A check is a test runner, type checker or linter, or a launcher running one (`npm test`, `go test`, `make lint`), alone or after `&&`; a piped check (`npm test | tail`), `;`, `|| true`, package names and paths do not count. A cheaper activity also needs `policy.downgradeMass` probability.
+
+### Changed
+
+- A downgrade lands on the cheapest tier the answer supports as a whole, not only on the chosen tier. A split answer (micro 0.63, low 0.3) on `high` now moves to `low` instead of staying until `micro` alone reaches 0.9, and a cold candidate can give way to a warm tier between it and the incumbent.
+- A prompt the classifier scores as a continuation of the task no longer keeps the route by itself. It is decided like a review: up on the usual votes, down past the checkpoint. The `continuation` reason is gone. `policy.continuationMass` now only decides whether a prompt counts as the running task.
+
+### Fixed
+
+- Replies after an in-turn move are labelled with the activity they ran on, not the turn's first label; the classifier's answer stays as recorded for the stats.
+
+The review interval, the dwell and the checkpoint are starting values, not tuned on data.
+
 ## 1.10.3 (2026-10-11)
 
 ### Fixed

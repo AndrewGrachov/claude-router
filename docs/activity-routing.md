@@ -32,6 +32,13 @@ The router compares routes, not labels. If the new activity resolves to the rout
 A move to a cheaper route must pay back its cache write first. A move to a stronger route needs the classifier's
 support. The [user guide](user-guide.md#route-by-activity) has the full rules.
 
+The label comes from the prompt, so it can be wrong. A prompt such as "run the worker brief" reads as `ops` and the
+turn may then spend 80 requests writing code. The router therefore also watches the turn's own tool calls. Once the
+turn edits a file, it moves to the `code` route of its tier (or `docs` for doc files) if that route is stronger. This
+move only goes up. The cache cost does not hold it back; only the cash cap on a credits-billed model can. A later
+classifier review in the same turn can move it down again, past the checks in
+[Changes during a task](user-guide.md#changes-during-a-task). The next turn starts from the route the turn ended on.
+
 ## The default matrix
 
 A `·` cell uses the base route.
@@ -51,7 +58,7 @@ Why each row:
   scores well above Haiku on coding tests. Sonnet at `medium` does not, so it is not used.
 - **`ops` at `medium`: Haiku · high.** Command runs last many requests, so Haiku pays back its cache write. Haiku is
   weaker on multi-step tool work, so `ops` at `high` stays on Opus. Repeated tool errors move an `ops` turn to the
-  `high` route, Opus · xhigh.
+  `high` route, Opus · xhigh. An `ops` turn that starts editing code moves to Opus · medium.
 - **`explore` and `docs`.** Moving them saved nothing in the replay. Haiku also scores lower on research
   benchmarks: 50.1% on Humanity's Last Exam with tools against 63.0% for Opus at `medium`. They keep the base routes.
 
@@ -163,7 +170,9 @@ model** in the pane, which writes that for you. The cell keeps that route if you
 again then:
 
 ```json
-{ "activities": { "ops": { "medium": { "model": "opus", "effort": "medium" } } } }
+{
+  "activities": { "ops": { "medium": { "model": "opus", "effort": "medium" } } }
+}
 ```
 
 Two other directions, with what they trade:
@@ -187,8 +196,8 @@ Two other directions, with what they trade:
 ```
 
 **Activity threshold.** An activity applies only when the classifier gives it at least this probability. Below it, a
-new task goes back to the base route if that move passes the usual checks, and a continuation of the running task
-keeps its activity, or moves to the classifier's activity when that route is stronger. The default is 60% (`policy.activityMass: 0.6`). Change it on the Policy tab under **Activities**,
+new task goes back to the base route if that move passes the usual checks; the running task follows
+[Changes during a task](user-guide.md#changes-during-a-task). The default is 60% (`policy.activityMass: 0.6`). Change it on the Policy tab under **Activities**,
 or in `router.json`. There is no data to tune it on yet: the probe results record whether the
 label was right, not the classifier's probabilities.
 

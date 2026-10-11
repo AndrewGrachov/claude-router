@@ -75,11 +75,23 @@ test('no advice or uncertain keeps the incumbent', () => {
   assert.equal(d.reason, 'uncertain');
 });
 
-test('continuation inherits the route and adds no vote', () => {
-  const d = runTurns(facts({ lastRoute: 'high' }), [advice('micro', { micro: 0.95 }, { continuation: 0.9 })])[0];
-  assert.equal(d.tier, 'high');
-  assert.equal(d.reason, 'continuation');
-  assert.equal(d.state.votes.length, 0);
+test('on the same task a cheaper tier waits for a checkpoint; a stronger one does not', () => {
+  const same = { continuation: 0.9 };
+  const twice = (choice) => [advice(choice, { [choice]: 0.99 }, same), advice(choice, { [choice]: 0.99 }, same)];
+  for (const [name, f, choice, expected] of [
+    ['down without a checkpoint', facts({ lastRoute: 'high' }), 'micro', ['high', 'downgrade-held']],
+    ['down past a checkpoint', { ...facts({ lastRoute: 'high' }), downAllowed: true }, 'micro', ['micro', 'downgrade']],
+    [
+      'down inside a turn without one',
+      { ...facts({ lastRoute: 'high' }), midTurn: true },
+      'micro',
+      ['high', 'downgrade-held'],
+    ],
+    ['up', facts({ lastRoute: 'low' }), 'medium', ['medium', 'upgrade']],
+  ]) {
+    const d = runTurns(f, twice(choice)).at(-1);
+    assert.deepEqual([d.tier, d.reason], expected, name);
+  }
 });
 
 test('a one-tier switch needs two consecutive votes with enough mass', () => {
@@ -276,16 +288,49 @@ test('the default micro to low upgrade is effort-only on Haiku: free on a shared
 test('a downgrade to a candidate colder than the incumbent raises the bar by its cache write, as an upgrade tax does', () => {
   const votes = [advice('low', { low: 0.92, high: 0.08 }), advice('low', { low: 0.92, high: 0.08 })];
 
-  const sonnetWarmOpusCold = facts({ lastRoute: 'high', servedBy: 'claude-sonnet-5-5' });
+  const sonnetWarmOpusCold = facts({ lastRoute: 'medium', servedBy: 'claude-sonnet-5-5' });
   const [, warm] = runTurns(sonnetWarmOpusCold, votes, initialState(), sonnetLow);
   assert.equal(warm.reason, 'downgrade');
   assert.equal(warm.estimate.threshold, config.policy.downgradeMass);
 
-  const coldCandidate = facts({ lastRoute: 'high', servedBy: 'claude-opus-5-5', effort: 'xhigh', tokens: 100_000 });
+  const coldCandidate = facts({ lastRoute: 'medium', servedBy: 'claude-opus-5-5', effort: 'medium', tokens: 100_000 });
   const [, cold] = runTurns(coldCandidate, votes, initialState(), sonnetLow);
   assert.equal(cold.reason, 'downgrade-pending');
   assert.ok(cold.estimate.threshold > config.policy.downgradeMass);
   assert.ok(cold.estimate.taxUsd > 0);
+});
+
+test('a downgrade lands on the cheapest tier the whole answer supports, at or above the choice', () => {
+  const run = (probabilities, f) =>
+    runTurns(f, [advice('micro', probabilities), advice('micro', probabilities)], initialState(), sonnetLow)[1];
+  const onOpus = facts({ lastRoute: 'high', servedBy: 'claude-opus-5-5', effort: 'xhigh', tokens: 100_000 });
+  for (const [name, probabilities, f, tier, reason] of [
+    ['micro alone clears the bar', { micro: 0.95, low: 0.05 }, facts({ lastRoute: 'high' }), 'micro', 'downgrade'],
+    [
+      'micro and low together clear it',
+      { micro: 0.63, low: 0.3, high: 0.07 },
+      facts({ lastRoute: 'high' }),
+      'low',
+      'downgrade',
+    ],
+    [
+      'a cold Sonnet waits, Opus at a lower effort shares the cache',
+      { micro: 0.63, low: 0.3, high: 0.07 },
+      onOpus,
+      'medium',
+      'downgrade',
+    ],
+    [
+      'nothing below the incumbent clears it',
+      { micro: 0.6, low: 0.2, high: 0.2 },
+      facts({ lastRoute: 'high' }),
+      'high',
+      'downgrade-pending',
+    ],
+  ]) {
+    const result = run(probabilities, f);
+    assert.deepEqual([result.tier, result.reason], [tier, reason], name);
+  }
 });
 
 const opusWarm = { lastRoute: 'high', servedBy: 'claude-opus-5-5', effort: 'xhigh', tokens: 100_000, output: 4_000 };

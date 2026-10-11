@@ -4,7 +4,7 @@ This guide describes the Mod shipped in the plugin. Claude Code 2.1.289 is the m
 
 ## Turn behavior
 
-At the first main step of a logical turn, the Mod reads recent message text and asks the active classifier (Jev, Clef, Clef Flash, OpenAI, or Ollama) for a tier, and for the turn's activity unless `activityRouting` is `off`. It applies local policy and saves the route. Tool continuations reuse that route. Before each continuation, context fit is checked again. A large tool result can move the step to a model with a larger window.
+At the first main step of a logical turn, the Mod reads recent message text and asks the active classifier (Jev, Clef, Clef Flash, OpenAI, or Ollama) for a tier, and for the turn's activity unless `activityRouting` is `off`. It applies local policy and saves the route. Tool continuations reuse that route, except that a turn whose tool calls edit code moves up to the `code` route, and every `policy.reviewEveryRequests` requests a background classifier review may move it either way ([Changes during a task](user-guide.md#changes-during-a-task)). Before each continuation, context fit is checked again. A large tool result can move the step to a model with a larger window.
 
 The classifier receives the current prompt and at most six preceding user or assistant text messages. Each item is limited to 1,200 characters. It does not receive system messages, tool inputs, or tool results. Claude Code's Anthropic credentials never enter the classifier request. Jev, Clef, Clef Flash, and OpenAI receive the text on their services; Ollama receives it on this machine. [Configuration](configuration.md#classifiers) lists each host.
 

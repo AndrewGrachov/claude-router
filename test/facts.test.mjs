@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { extractFacts as factsFromRequest, observedActivity, promptIndex } from '../lib/facts.mjs';
+import { extractFacts as factsFromRequest, observedActivity, promptIndex, verifiedSince } from '../lib/facts.mjs';
 import { assistant, body, memory, toolResult, user } from './helpers.mjs';
 
 const CONTEXT = { recentTurns: 4, maxTextChars: 30 };
@@ -375,4 +375,107 @@ test('promptIndex finds the last user prompt, past tool results and system messa
     ['malformed entries', [null, user('a'), { role: 'user' }], 2],
   ])
     assert.equal(promptIndex(messages), expected, name);
+});
+
+test("verifiedSince counts a check whose status is the command's: checkers and launcher subcommands, alone or in an && list", () => {
+  const passed = (command) =>
+    verifiedSince(
+      [
+        { role: 'assistant', content: [{ type: 'tool_use', id: 'a', name: 'Bash', input: { command } }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', is_error: false }] },
+      ],
+      0,
+    );
+  for (const [command, expected] of [
+    ['npm test', true],
+    ['npm run test:unit', true],
+    ['cd app && CI=1 npm run check', true],
+    ['uv run pytest -q', true],
+    ['go test ./...', true],
+    ['node --test test/a.test.mjs', true],
+    ['./node_modules/.bin/tsc -p tsconfig.json', true],
+    ['make lint', true],
+    ['node scripts/build-index.mjs', false],
+    ['cat sum.test.js', false],
+    ['git log --grep test', false],
+    ['python -m pytest', true],
+    ['npm test 2>&1', true],
+    ['npx vitest run', true],
+    ['npm install --save-dev vitest', false],
+    ['npm ls eslint', false],
+    ['npm test; git status --short', false],
+    ['npm test || true', false],
+    ['npm test 2>&1 | tail -5', false],
+    ['npm test &', false],
+    ['tsc --version', false],
+    ['pytest --help', false],
+    ['npx tsc --version', false],
+    ['npm --prefix test install', false],
+    ['make -C app lint', false],
+  ])
+    assert.equal(passed(command), expected, command);
+});
+
+test('verifiedSince does not take a check sent to the background as passed', () => {
+  const launch = (input) => [
+    {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'a', name: 'Bash', input: { command: 'npm test', ...input } }],
+    },
+  ];
+  const result = (text) => ({
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: 'a', is_error: false, content: [{ type: 'text', text }] }],
+  });
+  for (const [name, messages, expected] of [
+    ['finished', [...launch({}), result('42 passing')], true],
+    [
+      'run in background',
+      [...launch({ run_in_background: true }), result('Command running in background with ID: b1')],
+      false,
+    ],
+    [
+      'moved after a timeout',
+      [
+        ...launch({}),
+        result('Command did not complete within its 120s timeout and was moved to the background (ID: b2).'),
+      ],
+      false,
+    ],
+  ])
+    assert.equal(verifiedSince(messages, 0), expected, name);
+});
+
+test('verifiedSince is true only when the last check since the index passed', () => {
+  const bash = (id, command) => ({
+    role: 'assistant',
+    content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }],
+  });
+  const ran = (id, isError = false) => ({
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: id, is_error: isError }],
+  });
+  for (const [name, messages, from, expected] of [
+    ['a passed test run', [bash('a', 'npm test'), ran('a')], 0, true],
+    ['a failed build', [bash('a', 'cargo build'), ran('a', true)], 0, false],
+    ['a fix after a failure', [bash('a', 'npm test'), ran('a', true), bash('b', 'npm test'), ran('b')], 0, true],
+    ['a failure after a pass', [bash('a', 'npm test'), ran('a'), bash('b', 'npm test'), ran('b', true)], 0, false],
+    ['no check, only commands', [bash('a', 'git status'), ran('a')], 0, false],
+    ['a check before the index', [bash('a', 'npm test'), ran('a'), bash('b', 'ls'), ran('b')], 2, false],
+    ['a check still running', [bash('a', 'npm test')], 0, false],
+    [
+      'a read of a test file after a failure',
+      [bash('a', 'npm test'), ran('a', true), bash('b', 'git diff -- test/router.test.mjs'), ran('b')],
+      0,
+      false,
+    ],
+    [
+      'a search for a test word after a failure',
+      [bash('a', 'npm test'), ran('a', true), bash('b', 'rg test package.json'), ran('b')],
+      0,
+      false,
+    ],
+    ['a check word inside quotes', [bash('a', 'git commit -m "fix tests; npm test"'), ran('a')], 0, false],
+  ])
+    assert.equal(verifiedSince(messages, from), expected, name);
 });

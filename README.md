@@ -9,7 +9,7 @@ The Mod changes only the model and effort in Claude Code's turn hook. Claude Cod
 
 ## Supported classifiers
 
-The active classifier is asked once per logical turn, for the tier and for the turn's activity. Pick one on the pane's **Classifier** tab or in `router.json`; only the active one receives prompt text. With subagent routing `on` (the default), it is also asked once per routed subagent, with the task's description and prompt; set `"subagentRouting": "off"` to keep that text local.
+The active classifier is asked at the start of each logical turn, for the tier and for the turn's activity, and again in the background every 4 requests while the turn runs (`policy.reviewEveryRequests`). Pick one on the pane's **Classifier** tab or in `router.json`; only the active one receives prompt text. With subagent routing `on` (the default), it is also asked once per routed subagent, with the task's description and prompt; set `"subagentRouting": "off"` to keep that text local.
 
 | Classifier | Service                                    | Credential                          | Prompt text goes to       | How it is asked for the activity                                      |
 | ---------- | ------------------------------------------ | ----------------------------------- | ------------------------- | --------------------------------------------------------------------- |
@@ -54,7 +54,7 @@ sequenceDiagram
   Mod-->>Dev: Status band and router pane
 ```
 
-The active classifier labels a new logical turn once. Tool continuations keep that choice. A local policy applies vote, context, failure, and cache-cost rules before the Mod changes the next step. Claude Code owns request construction, model credentials, tools, streaming, and the API cost ledger.
+The active classifier labels each new logical turn, and the router checks the route again while the task runs: a turn labelled `ops` that edits code moves up to the `code` route at once, and a background classifier review every 4 requests can move the tier or the activity either way. A cheaper route on the same task waits for a dwell and a passed test, build or lint run. See [Changes during a task](docs/user-guide.md#changes-during-a-task). A local policy applies vote, context, failure, and cache-cost rules before the Mod changes the next step. Claude Code owns request construction, model credentials, tools, streaming, and the API cost ledger.
 
 | Tier     | Default model | Effort   |
 | -------- | ------------- | -------- |

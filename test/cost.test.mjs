@@ -107,7 +107,14 @@ test('unknown TTL keeps an optimistic incumbent scenario and a cold candidate up
 test('the default policy accounts for bounded native switching costs', () => {
   const advice = adviceOf('micro', { micro: 0.92, medium: 0.08 });
   const state = { ...initialState(), votes: [{ tier: 'micro', turn: 0 }] };
-  const args = { config: SONNET_MEDIUM, facts, advice, state, baseline: 'medium', now };
+  // Low runs on the micro model too, so no tier between the choice and the incumbent takes the move.
+  const config = loadConfig({
+    userFile: {
+      models: { tiny },
+      routes: { medium: { model: 'sonnet', effort: 'xhigh' }, low: { model: 'tiny' }, micro: { model: 'tiny' } },
+    },
+  });
+  const args = { config, facts, advice, state, baseline: 'medium', now };
   const original = decide(args);
   const bounded = decide({ ...args, costs: native });
   assert.deepEqual(original, bounded);

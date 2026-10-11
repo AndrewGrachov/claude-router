@@ -139,6 +139,7 @@ function turnInput({
   noAdvice = false,
   effort = 'medium',
   loopActivity = activity,
+  downAllowed = false,
 }) {
   const running = resolveRoute(config, tier, activity);
   const models = warm
@@ -174,6 +175,7 @@ function turnInput({
     pin: null,
     turnKey: 't',
     historyMeasured: measured,
+    downAllowed,
   };
   const tierAdvice =
     choice === 'uncertain' ? advice('uncertain', { uncertain: 1 }) : advice(choice, { [choice]: 0.97 });
@@ -237,14 +239,24 @@ test('the activity decision: (route now, tier advice, activity advice, cache, co
       ['low', 'code', 'activity-up', SONNET, 'medium'],
     ],
     [
-      'continuation never moves down',
+      'continuation moves down only past a checkpoint',
       { activity: 'code', continuation: 0.9, label: labelOf('ops', 0.99) },
-      ['low', 'code', 'continuation', SONNET, 'medium'],
+      ['low', 'code', 'same-tier', SONNET, 'medium'],
+    ],
+    [
+      'continuation past a checkpoint moves down on a confident label',
+      { activity: 'code', continuation: 0.9, label: labelOf('ops', 0.99), downAllowed: true, warm: false },
+      ['low', 'ops', 'activity-down', HAIKU, 'high'],
+    ],
+    [
+      'continuation past a checkpoint keeps a label below the downgrade mass',
+      { activity: 'code', continuation: 0.9, label: labelOf('ops', 0.8), downAllowed: true, warm: false },
+      ['low', 'code', 'same-tier', SONNET, 'medium'],
     ],
     [
       'continuation with an uncertain label keeps the activity',
       { activity: 'code', continuation: 0.9, label: labelOf('uncertain') },
-      ['low', 'code', 'continuation', SONNET, 'medium'],
+      ['low', 'code', 'same-tier', SONNET, 'medium'],
     ],
     [
       'uncertain returns down to the base route',
