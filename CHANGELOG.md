@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.10.5 (2026-10-11)
 
 The route now follows the task while it runs, for the tier and the activity, in both directions. Before, a turn was
 routed once, from its prompt, and a continuation prompt could only keep the route. A team worker whose `/goal` brief
