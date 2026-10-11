@@ -1,5 +1,31 @@
 import type { PluginState } from 'claude-code';
 import { expect, mock, test } from 'claude-code/testing';
+import { extractFacts } from '../lib/facts.mjs';
+import { assistant, body, memory, toolResult, user } from './helpers.mjs';
+
+test('full failure fingerprints distinguish test failures inside the Mod engine', () => {
+  const header =
+    '> @alexeiled/claude-router@1.10.0 test\n' +
+    '> node --test --test-timeout=8000 test/*.test.mjs experiments/mod-router/scripts/*.test.mjs\n\n';
+  const failure = (name: string) => `${header}not ok 1 - ${name}\n  error: 'unauthorized'\n`;
+  for (const [nextTest, repeated] of [
+    ['logout', false],
+    ['login', true],
+  ] as const) {
+    const facts = extractFacts(
+      body([
+        user('fix the tests'),
+        assistant('running', ['Bash']),
+        toolResult(failure('login'), { isError: true }),
+        assistant('editing', ['Edit']),
+        toolResult(failure(nextTest), { isError: true }),
+      ]),
+      memory(),
+      { recentTurns: 6, maxTextChars: 1200 },
+    );
+    expect(facts.failure !== null).toBe(repeated);
+  }
+});
 
 test('terminal and desktop panes show observed usage, cost scenarios and native controls', async ($, on) => {
   mock.store(on);

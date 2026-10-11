@@ -74,6 +74,8 @@ Node.js is not part of routing. It is used for development, the optional configu
 
 One logical turn gets one classification. Tool continuations reuse the decision and add no votes. Before each step, the controller checks whether the selected model still fits after new tool output.
 
+Repeated tool-error escalation needs matching non-empty error output and an intervening edit attempt within a 40-message lookback. A bounded fingerprint covers the full output, not only the runner header. It removes ANSI colors, normalizes line endings, and normalizes source positions in stack frames and TAP `location` fields. TAP durations and Jest `✕ ... (N ms)` timings are also normalized. Other test names, case, whitespace, and numeric error values are kept. Unrecognized runner noise remains part of the signature: changed output can miss a repeat rather than trigger a false escalation.
+
 An upgrade or downgrade needs a streak of supporting votes (`upgradeVotes`, `downgradeVotes`), because staying keeps a warm cache. Before the first measured reply of a history (session start, clear, rewind, committed compaction), no cache from it exists yet, so one vote is enough. The mass bars, the cash gate, escalation, holds and continuations apply as usual.
 
 A move to a smaller context window needs a main-response measurement from the current history and Claude's local context estimate. The router uses the larger available reading and reserves 20% of the model window. If it cannot establish fit, it keeps the current model with `context-unknown`. It does not infer token count from character count.

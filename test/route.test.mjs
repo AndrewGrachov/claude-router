@@ -13,7 +13,7 @@ import {
   prepareLoop,
   resetHistory,
 } from '../lib/route.mjs';
-import { advice as adviceOf } from './helpers.mjs';
+import { advice as adviceOf, assistant, toolResult, user } from './helpers.mjs';
 
 const now = 1_000_000;
 const model = 'claude-haiku-5-5';
@@ -121,6 +121,35 @@ test('native facts use engine turn ids and bounded prompt rather than tool outpu
     facts.turns.some((v) => v.text.includes('PRIVATE_TOOL')),
     false,
   );
+});
+
+test('fixing different tests keeps the route; repeating the same failure escalates', () => {
+  const header =
+    '> @alexeiled/claude-router@1.10.0 test\n' +
+    '> node --test --test-timeout=8000 test/*.test.mjs experiments/mod-router/scripts/*.test.mjs\n\n';
+  const failure = (name) => `${header}not ok 1 - ${name}\n  error: 'unauthorized'\n`;
+  for (const [name, nextTest, tier, reason] of [
+    ['progress to another test', 'logout', 'low', 'no-advice'],
+    ['test name with a position', 'login at line 40', 'low', 'no-advice'],
+    ['test name with different whitespace', 'login  at line 12', 'low', 'no-advice'],
+    ['same failing test', 'login at line 12', 'medium', 'escalation'],
+  ]) {
+    const loop = emptyLoop(DEFAULTS, model);
+    const facts = nativeFacts(DEFAULTS, loop, {
+      ...context,
+      messages: [
+        user('fix the tests'),
+        assistant('running', ['Bash']),
+        toolResult(failure('login at line 12'), { isError: true }),
+        assistant('editing', ['Edit']),
+        toolResult(failure(nextTest), { isError: true }),
+        user('continue'),
+      ],
+    });
+    const { decision } = chooseRoute(DEFAULTS, loop, input(loop, { facts, advice: null }));
+    assert.deepEqual([decision.tier, decision.reason], [tier, reason], name);
+    assert.equal(decision.escalated, reason === 'escalation', name);
+  }
 });
 
 test('a new or reset history switches on one vote; a measured one waits for the streak', () => {

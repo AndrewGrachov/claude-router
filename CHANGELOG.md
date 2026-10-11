@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.2 (2026-10-11)
+
+### Fixed
+
+- Different npm test failures that share a runner header no longer trigger a false model escalation. Repeated-failure matching fingerprints the full normalized error output instead of its first 120 characters. Test names, case, whitespace, and numeric error values stay distinct; empty errors are ignored. Known source positions and runner timings remain comparable across retries.
+
 ## 1.10.1 (2026-10-11)
 
 ### Removed

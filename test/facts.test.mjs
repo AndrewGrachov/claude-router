@@ -75,14 +75,13 @@ test('repeated failure needs the same signature with an edit attempt between', (
   const same = body([
     user('go'),
     assistant('a', ['Bash']),
-    toolResult('Error: test_login failed at line 12', { isError: true }),
+    toolResult('Error: test_login failed\n    at login (test/login.mjs:12:4)', { isError: true }),
     assistant('b', ['Edit']),
-    toolResult('Error: test_login failed at line 40', { isError: true }),
+    toolResult('Error: test_login failed\n    at login (test/login.mjs:40:9)', { isError: true }),
   ]);
-  assert.deepEqual(factsFromRequest(same, memory(), CONTEXT).failure, {
-    signature: 'error: test_login failed at line #',
-    index: 4,
-  });
+  const failure = factsFromRequest(same, memory(), CONTEXT).failure;
+  assert.equal(failure.index, 4);
+  assert.ok(failure.signature);
   const noEdit = body([
     user('go'),
     assistant('a', ['Bash']),
@@ -91,6 +90,119 @@ test('repeated failure needs the same signature with an edit attempt between', (
     toolResult('Error: x', { isError: true }),
   ]);
   assert.equal(factsFromRequest(noEdit, memory(), CONTEXT).failure, null);
+});
+
+test('failure matching uses the whole diagnostic without erasing test names or error values', () => {
+  const header =
+    '> @alexeiled/claude-router@1.10.0 test\n' +
+    '> node --test --test-timeout=8000 test/*.test.mjs experiments/mod-router/scripts/*.test.mjs\n\n';
+  const failure = (name, error) => `${header}not ok 1 - ${name}\n  error: '${error}'\n`;
+  for (const [name, before, after, repeated] of [
+    [
+      'different tests after the npm header',
+      failure('login', 'unauthorized'),
+      failure('logout', 'unauthorized'),
+      false,
+    ],
+    ['numeric test names', failure('case_1', 'unauthorized'), failure('case_2', 'unauthorized'), false],
+    ['case-sensitive test names', failure('Login', 'unauthorized'), failure('login', 'unauthorized'), false],
+    [
+      'changed numeric error values',
+      failure('login', 'expected 200, got 401'),
+      failure('login', 'expected 200, got 403'),
+      false,
+    ],
+    [
+      'changed error after a long prefix',
+      `${'common output '.repeat(100)}error: login`,
+      `${'common output '.repeat(100)}error: logout`,
+      false,
+    ],
+    ['different ports', 'Error: refused api.example.com:8080', 'Error: refused api.example.com:9090', false],
+    ['test names containing line numbers', failure('line 1', 'unauthorized'), failure('line 2', 'unauthorized'), false],
+    [
+      'test names containing positions',
+      failure('fails at line 12', 'unauthorized'),
+      failure('fails at line 40', 'unauthorized'),
+      false,
+    ],
+    [
+      'error values containing positions',
+      failure('login', 'expected at line 12'),
+      failure('login', 'expected at line 40'),
+      false,
+    ],
+    [
+      'error values containing source positions',
+      failure('login', 'expected file.js:12:4'),
+      failure('login', 'expected file.js:40:9'),
+      false,
+    ],
+    [
+      'error values containing whitespace',
+      failure('login', 'expected "a  b"'),
+      failure('login', 'expected "a b"'),
+      false,
+    ],
+    ['test names containing whitespace', failure('a  b', 'unauthorized'), failure('a b', 'unauthorized'), false],
+    ['error values containing timings', 'Error: expected (12 ms)', 'Error: expected (45 ms)', false],
+    ['same long diagnostic', failure('login', 'unauthorized'), failure('login', 'unauthorized'), true],
+    ['empty errors', '', '', false],
+    [
+      'reminder-only errors',
+      '<system-reminder>first</system-reminder>',
+      '<system-reminder>second</system-reminder>',
+      false,
+    ],
+    [
+      'line numbers, stack positions and TAP timings',
+      `${failure('login', 'unauthorized')}  at login (test/login.test.mjs:12:4)\n  location: 'test/login.test.mjs:12:4'\n  duration_ms: 12.3\n# duration_ms 20.4\n`,
+      `${failure('login', 'unauthorized')}  at login (test/login.test.mjs:40:9)\n  location: 'test/login.test.mjs:40:9'\n  duration_ms: 45.6\n# duration_ms 60.7\n`,
+      true,
+    ],
+    ['ANSI colors', failure('login', 'unauthorized'), `\u001b[31m${failure('login', 'unauthorized')}\u001b[0m`, true],
+    ['Jest test timings', '✕ login (12 ms)\nError: unauthorized', '✕ login (45 ms)\nError: unauthorized', true],
+    ['line endings', 'Error: unauthorized\n  at login', 'Error: unauthorized\r\n  at login', true],
+  ]) {
+    const facts = factsFromRequest(
+      body([
+        user('fix the tests'),
+        assistant('running', ['Bash']),
+        toolResult(before, { isError: true }),
+        assistant('editing', ['Edit']),
+        toolResult(after, { isError: true }),
+      ]),
+      memory(),
+      CONTEXT,
+    );
+    assert.equal(facts.failure !== null, repeated, name);
+    if (repeated) {
+      assert.equal(facts.failure.index, 4, name);
+      assert.ok(facts.failure.signature.length > 0 && facts.failure.signature.length <= 120, name);
+    }
+  }
+});
+
+test('repeated failures must fall within the 40-message lookback', () => {
+  for (const [extra, repeated] of [
+    [38, true],
+    [39, false],
+    [41, false],
+  ]) {
+    const facts = factsFromRequest(
+      body([
+        user('fix'),
+        assistant('running', ['Bash']),
+        toolResult('Error: login', { isError: true }),
+        assistant('editing', ['Edit']),
+        toolResult('Error: login', { isError: true }),
+        ...Array.from({ length: extra }, () => assistant('waiting')),
+      ]),
+      memory(),
+      CONTEXT,
+    );
+    assert.equal(facts.failure !== null, repeated, `${extra} later messages`);
+  }
 });
 
 test('memory fields pass through', () => {
