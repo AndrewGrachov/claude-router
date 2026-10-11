@@ -1,7 +1,7 @@
 {
   "name": "router",
   "displayName": "Router",
-  "version": "1.10.2",
+  "version": "1.10.3",
   "description": "Model and effort routing for the main conversation by task difficulty and activity, advised by a prompt classifier (Jev, Clef, Clef Flash, OpenAI or local Ollama). Subagents get one model at spawn: every agent that does not pin one.",
   "author": {
     "name": "Alexei Ledenev",
