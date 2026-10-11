@@ -165,12 +165,12 @@ test('the first turn of a session switches on one classifier answer', async () =
 });
 
 test('a fresh session starts Auto on a model some route runs and Manual on any other', async () => {
-  // With activity routing on, the default, Sonnet runs the code cell at low; in shadow only the tier routes count.
+  // With activity routing on, the default, Sonnet runs the code cell at low; with it off only the tier routes count.
   for (const [model, file, mode, effort] of [
     ['claude-opus-5-5', {}, 'auto', 'medium'],
     ['claude-haiku-5-5', {}, 'auto', 'high'],
     ['claude-sonnet-5-5', {}, 'auto', 'high'],
-    ['claude-sonnet-5-5', { activityRouting: 'shadow' }, 'manual', 'low'],
+    ['claude-sonnet-5-5', { activityRouting: 'off' }, 'manual', 'low'],
     ['claude-fable-5-1', {}, 'manual', 'low'],
   ]) {
     const h = harness();
@@ -186,7 +186,7 @@ test('a fresh session starts Auto on a model some route runs and Manual on any o
 
 test('a fresh session on a model no tier routes to says why routing starts off, until the mode changes', async () => {
   const h = harness();
-  h.files.set(CONFIG, JSON.stringify({ activityRouting: 'shadow' }));
+  h.files.set(CONFIG, JSON.stringify({ activityRouting: 'off' }));
   h.model('claude-sonnet-5-5');
   await start(h);
   const line = (await band(h)).line;
@@ -553,14 +553,12 @@ test('with activity routing on, an ops turn moves from Sonnet to Haiku inside it
     switches: { tier: 0, activity: 1 },
     lateral: { taken: 1, refused: 0 },
     agreement: { matched: 2, total: 2 },
-    shadow: { differs: 0, turns: 0, estimated: 0, minUsd: 0, maxUsd: 0 },
   });
   assert.deepEqual(h.preferences.get(STATS), {
     version: 1,
     confusion: { code: { code: 1 }, ops: { ops: 1 } },
     runs: { code: [1, 0, 0, 0, 0] },
     lateral: { taken: 1, refused: 0 },
-    shadow: { differs: 0, turns: 0, estimated: 0, minUsd: 0, maxUsd: 0 },
   });
   const metrics = h.preferences.get('activity:metrics:v1:s1');
   assert.ok(Number.isFinite(metrics.since));
@@ -850,38 +848,6 @@ test('with activity routing on, a turn without an activity answer keeps the acti
   assert.deepEqual(h.preferences.get(STATS).runs, { code: [1, 0, 0, 0, 0] });
 });
 
-test('shadow asks and shows what on would do, and never changes the routed model', async () => {
-  const h = harness(JEV_KEY);
-  h.files.set(CONFIG, JSON.stringify({ activityRouting: 'shadow' }));
-  const bodies = answering(h, jevResponse('low', LOW, 0, { code: 0.9, ops: 0.1 }));
-  await h.event('session.start', { cwd: '/fixture' });
-  await turn(h, 't1', 'claude-haiku-5-5', ['Read']);
-  assert.ok(bodies[0].questions.activity);
-  assert.deepEqual([h.requests[0].model, h.requests[0].effort], ['claude-haiku-5-5', 'high']);
-  assert.equal(h.loop().lastActivity, null);
-  assert.deepEqual(h.toasts, []);
-  assert.equal(h.view().activity, 'code');
-  assert.equal(h.view().activityChoice, 'code');
-  assert.deepEqual(h.view().wouldRoute, {
-    activity: 'code',
-    tier: 'low',
-    model: 'claude-sonnet-5-5',
-    effort: 'high',
-    reason: 'activity-up',
-    lateral: 'taken',
-    difference: null,
-  });
-  assert.match((await band(h)).line, / low {2}coding \(shadow\) → Haiku 5\.5 · high/);
-  assert.deepEqual(h.view().activityStats.shadow, { differs: 1, turns: 1, estimated: 0, minUsd: 0, maxUsd: 0 });
-  assert.deepEqual(h.view().activityStats.agreement, { matched: 0, total: 1 });
-  assert.deepEqual(h.preferences.get(STATS).shadow, { differs: 1, turns: 1, estimated: 0, minUsd: 0, maxUsd: 0 });
-  assert.deepEqual(h.preferences.get(STATS).confusion, { code: { read: 1 } });
-  h.surfaces([]);
-  const { text } = await h.event('command.run', { command: 'router', args: '' });
-  assert.match(text, /^Activity: code \(90%\)$/m);
-  assert.match(text, /^Route: low \+ code would use Sonnet 5\.5 · high \(shadow; using Haiku 5\.5 · high\)$/m);
-});
-
 test('the classifier latency is the wait for its answer, not the routing after it', async () => {
   const h = harness(JEV_KEY);
   h.files.set(CONFIG, JSON.stringify({ activityRouting: 'on' }));
@@ -896,24 +862,15 @@ test('the classifier latency is the wait for its answer, not the routing after i
   assert.deepEqual(h.preferences.get('activity:metrics:v1:s1').latency.jev, [1, ...Array(21).fill(0)]);
 });
 
-test('shadow prices what on would route differently and the counts across sessions reach the view', async () => {
+test('the counts across sessions reach the view and survive a restart', async () => {
   const h = harness(JEV_KEY);
-  h.files.set(CONFIG, JSON.stringify({ activityRouting: 'shadow' }));
   answering(h, jevResponse('low', LOW, 0, { code: 0.9, ops: 0.1 }));
   await h.event('session.start', { cwd: '/fixture' });
-  assert.equal(h.view().activityStore.shadow.turns, 0);
   await turn(h, 't1', 'claude-haiku-5-5', ['Edit']);
   await turn(h, 't2', 'claude-haiku-5-5', ['Edit']);
-  const { minUsd, maxUsd } = h.view().wouldRoute.difference;
-  assert.ok(minUsd > 0 && maxUsd > minUsd, 'Sonnet for code costs more than the Haiku that ran');
-  const shadow = { differs: 2, turns: 2, estimated: 1, minUsd, maxUsd };
-  assert.deepEqual(h.view().activityStats.shadow, shadow);
-  assert.deepEqual(h.preferences.get(STATS).shadow, shadow);
   assert.deepEqual(h.view().activityStore, h.preferences.get(STATS));
   await press(h, 'tab-usage');
   const lines = texts(await h.render());
-  const est = '· est. +$0.000 … +$0.035';
-  assert.ok(lines.includes(`Shadow     on would route 2 of 2 turns differently ${est} for 1 at list prices`));
   assert.ok(lines.includes('Agreement  classifier vs tools: 2 of 2 turns (100%)'));
   h.surfaces([]);
   const detail = async (r) => (await r.event('command.run', { command: 'router', args: '' })).text;
@@ -924,14 +881,11 @@ test('shadow prices what on would route differently and the counts across sessio
   await h.event('session.end', { reason: 'clear' });
 
   const reloaded = harness(JEV_KEY, h.preferences);
-  reloaded.files.set(CONFIG, JSON.stringify({ activityRouting: 'shadow' }));
   await reloaded.event('session.start', { cwd: '/fixture' });
   assert.equal(reloaded.view().activityStats, null);
   assert.deepEqual(reloaded.view().activityStore, h.preferences.get(STATS));
   await press(reloaded, 'tab-classifier');
-  const across = texts(await reloaded.render());
-  assert.ok(across.includes('Labelled   2 turns'));
-  assert.ok(across.includes(`Shadow     on would route 2 of 2 turns differently ${est} for 1 at list prices`));
+  assert.ok(texts(await reloaded.render()).includes('Labelled   2 turns'));
 });
 
 test('a corrupted or unreadable stats store shows an empty readout and never breaks the session', async () => {
@@ -966,7 +920,7 @@ test('/router activities writes the mode to router.json, off stops the question,
   await turn(h, 't1', 'claude-haiku-5-5');
   assert.ok(bodies[0].questions.activity);
   const command = async (args) => (await h.event('command.run', { command: 'router', args })).text;
-  assert.equal(await command('activities later'), 'Choose activities off, shadow, on.');
+  assert.equal(await command('activities later'), 'Choose activities off, on.');
   assert.equal(await command('activities on'), 'Activity routing is already on.');
   assert.equal(await command('activities off'), 'Saved: activity routing on → off. Applies from the next turn.');
   assert.deepEqual(JSON.parse(h.files.get(CONFIG)), { activityRouting: 'off' });

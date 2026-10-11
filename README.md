@@ -9,7 +9,7 @@ The Mod changes only the model and effort in Claude Code's turn hook. Claude Cod
 
 ## Supported classifiers
 
-The active classifier is asked once per logical turn, for the tier and for the turn's activity. Pick one on the pane's **Classifier** tab or in `router.json`; only the active one receives prompt text. With subagent routing `on` (the default) or `shadow`, it is also asked once per routed subagent, with the task's description and prompt; set `"subagentRouting": "off"` to keep that text local.
+The active classifier is asked once per logical turn, for the tier and for the turn's activity. Pick one on the pane's **Classifier** tab or in `router.json`; only the active one receives prompt text. With subagent routing `on` (the default), it is also asked once per routed subagent, with the task's description and prompt; set `"subagentRouting": "off"` to keep that text local.
 
 | Classifier | Service                                    | Credential                          | Prompt text goes to       | How it is asked for the activity                                      |
 | ---------- | ------------------------------------------ | ----------------------------------- | ------------------------- | --------------------------------------------------------------------- |
@@ -39,7 +39,7 @@ sequenceDiagram
   Dev->>Code: Prompt
   opt Subagent spawn
     Code->>Mod: agent.spawn
-    Mod-->>Code: One model for the agent (on), or none (shadow, off)
+    Mod-->>Code: One model for the agent (on), or none (off)
   end
   Code->>Mod: Main or subagent step
   alt Main conversation, routing on
@@ -74,7 +74,7 @@ Activity routing adds a second label: what the turn produces (`code`, `debug`, `
 | `ops`                             | ·              | ·                 | **Haiku · high** | ·            |
 | `explore`, `docs`                 | ·              | ·                 | ·                | ·            |
 
-`/router activities shadow` shows what it would route and keeps the base routes; `/router activities off` stops asking. [Activity routing](docs/activity-routing.md) explains each cell and how to change it. The label is optional: on `uncertain` or a weak label the base route is used if the move passes the cache check, when the activity answer fails the running activity stays and the tier answer still applies, and when the classifier fails the running route stays. See [Route by activity](docs/user-guide.md#route-by-activity), and [Evaluation](docs/evaluation.md#activity-routing) for how it is checked. Its default overrides rest on published vendor results and a list-price replay of one developer's sessions, not measured savings.
+`/router activities off` stops asking and keeps the base routes. [Activity routing](docs/activity-routing.md) explains each cell and how to change it. The label is optional: on `uncertain` or a weak label the base route is used if the move passes the cache check, when the activity answer fails the running activity stays and the tier answer still applies, and when the classifier fails the running route stays. See [Route by activity](docs/user-guide.md#route-by-activity), and [Evaluation](docs/evaluation.md#activity-routing) for how it is checked. Its default overrides rest on published vendor results and a list-price replay of one developer's sessions, not measured savings.
 
 ## Install
 

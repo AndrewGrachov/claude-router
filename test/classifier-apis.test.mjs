@@ -150,7 +150,7 @@ test('activity routing off sends the 1.5 request bodies byte for byte', () => {
 });
 
 test('the Ollama route request is the same in every mode: the activity is its own step', () => {
-  for (const mode of ['shadow', 'on'])
+  for (const mode of ['off', 'on'])
     assert.equal(
       JSON.stringify(buildRequest(configFor('ollama', mode), offRequests.prompt, offRequests.turns)),
       offRequests.bodies.ollama,
@@ -164,10 +164,8 @@ const activityQuestion = {
 };
 for (const [classifier, mode, asked] of [
   ['jev', 'off', false],
-  ['jev', 'shadow', true],
   ['jev', 'on', true],
   ['openai', 'off', false],
-  ['openai', 'shadow', true],
   ['openai', 'on', true],
 ]) {
   test(`${classifier} ${asked ? 'asks' : 'does not ask'} the activity with routing ${mode}`, () => {
@@ -177,7 +175,7 @@ for (const [classifier, mode, asked] of [
 }
 
 test('System One asks the activity as a choice over every activity and uncertain', () => {
-  const { activity } = buildRequest(configFor('jev', 'shadow'), 'deploy the fix', []).questions;
+  const { activity } = buildRequest(configFor('jev', 'on'), 'deploy the fix', []).questions;
   assert.equal(activity.type, 'choice');
   assert.deepEqual(Object.keys(activity.criteria), ACTIVITY_VALUES);
   assert.match(activity.instructions.question, /Which activity/);
@@ -198,13 +196,13 @@ test('OpenAI asks the activity as a second choice after the route and continuati
 });
 
 test('a valid activity answer reads as the activity advice next to the route', () => {
-  const jev = parseAnswers(configFor('jev', 'shadow'), fixture('jev-activity-response.json'));
+  const jev = parseAnswers(configFor('jev', 'on'), fixture('jev-activity-response.json'));
   assert.equal(jev.choice, 'low');
   assert.equal(jev.continuation, 0.12);
   assert.equal(jev.activity.choice, 'ops');
   assert.equal(jev.activity.probabilities.ops, 0.81);
   assert.deepEqual(Object.keys(jev.activity.probabilities), ACTIVITY_VALUES);
-  const openai = parseAnswers(configFor('openai', 'shadow'), fixture('openai-decisions-activity-response.json'));
+  const openai = parseAnswers(configFor('openai', 'on'), fixture('openai-decisions-activity-response.json'));
   assert.equal(openai.choice, 'medium');
   assert.equal(openai.activity.choice, 'debug');
   assert.equal(openai.activity.probabilities.debug, 0.72);
@@ -263,7 +261,7 @@ test('probabilities of the wrong shape read as no activity', () => {
 });
 
 test('the Ollama activity step reuses the route request prefix and asks eight letters', () => {
-  const config = configFor('ollama', 'shadow');
+  const config = configFor('ollama', 'on');
   const route = buildRequest(config, offRequests.prompt, offRequests.turns);
   const step = buildActivityRequest(config, offRequests.prompt, offRequests.turns);
   assert.deepEqual(step.messages[0], route.messages[0]);
@@ -278,10 +276,9 @@ test('the Ollama activity step reuses the route request prefix and asks eight le
   assert.deepEqual(stepRest, routeRest);
 });
 
-test('only Ollama with activity routing on or shadow has a second step', () => {
+test('only Ollama with activity routing on has a second step', () => {
   for (const [classifier, mode, expected] of [
     ['ollama', 'off', false],
-    ['ollama', 'shadow', true],
     ['ollama', 'on', true],
     ['jev', 'on', false],
     ['openai', 'on', false],

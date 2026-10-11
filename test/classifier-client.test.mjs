@@ -270,7 +270,7 @@ const local = (text) => ({ ok: true, status: 200, text, headers: {} });
 const never = () => new Promise(() => {});
 
 // Ollama input whose route request answers at once and whose activity request is `step(body)`.
-function ollamaInput(timing, step, activityRouting = 'shadow') {
+function ollamaInput(timing, step, activityRouting = 'on') {
   const bodies = [];
   const args = {
     ...input(timing, async (_url, init) => {

@@ -115,7 +115,7 @@ test('agent frontmatter is read from YAML or a one-line JSON object, top-level s
 
 test('the config rejects a type route that is not a models key or classify, and models that do not exist', () => {
   for (const [file, message] of [
-    [{ subagentRouting: 'always' }, /subagentRouting must be one of off, shadow, on/],
+    [{ subagentRouting: 'always' }, /subagentRouting must be one of off, on/],
     [{ subagents: { types: { Explore: 'gpt' } } }, /subagents\.types\.Explore must be a models key, classify or null/],
     [{ subagents: { heavy: 'gpt' } }, /subagents\.heavy is not in models/],
     [{ subagents: { heavyMass: 1.5 } }, /subagents\.heavyMass must be between 0 and 1/],
@@ -188,7 +188,6 @@ const usage = (model, { input = 2_000, read = 140_000, write = 8_000, output = 1
 const record = (extra = {}) =>
   spawnRecord({
     sessionId: 's1',
-    mode: 'shadow',
     spawn: spawn(),
     pass: null,
     choice: 'haiku',
@@ -199,8 +198,8 @@ const record = (extra = {}) =>
     ...extra,
   });
 
-test('shadow prices each reply on the model it ran on and on the decided one, Haiku at its long-context rate', () => {
-  const agent = addAgentReply(DEFAULTS, record(), usage('claude-opus-5-5'), '5m');
+test('a reply is priced on the model it ran on and on core’s, Haiku at its long-context rate', () => {
+  const agent = addAgentReply(DEFAULTS, record({ coreModel: 'claude-haiku-5-5' }), usage('claude-opus-5-5'), '5m');
   const counts = { input: 2_000, cacheRead: 140_000, cacheWrite: 8_000, output: 1_000 };
   assert.equal(agent.requests, 1);
   assert.equal(agent.pricedRequests, 1);
@@ -210,13 +209,13 @@ test('shadow prices each reply on the model it ran on and on the decided one, Ha
   const haiku = (0.5 * (2_000 + 8_000 * 1.25) + 0.05 * 140_000 + 2.5 * 1_000) / 1e6;
   assert.ok(Math.abs(agent.otherUsd - haiku) < 1e-12);
   assert.equal(
-    addAgentReply(DEFAULTS, record(), usage('claude-opus-5-5'), '1h').actualUsd,
+    addAgentReply(DEFAULTS, record({ coreModel: 'claude-haiku-5-5' }), usage('claude-opus-5-5'), '1h').actualUsd,
     requestUsd(DEFAULTS.models.opus, counts, 2),
   );
 });
 
 test('on prices the reply on the routed model and the same tokens on core’s; a pass-through only on its own', () => {
-  const on = addAgentReply(DEFAULTS, record({ mode: 'on' }), usage('claude-haiku-5-5'), '5m');
+  const on = addAgentReply(DEFAULTS, record(), usage('claude-haiku-5-5'), '5m');
   assert.ok(on.actualUsd < on.otherUsd);
   const passed = addAgentReply(DEFAULTS, record({ pass: 'workflow', choice: null }), usage('claude-opus-5-5'), '5m');
   assert.equal(passed.pricedRequests, 1);
@@ -228,17 +227,17 @@ test('a reply without a price or with incomplete usage is counted as a request a
     const agent = addAgentReply(DEFAULTS, record(), reply, '5m');
     assert.deepEqual([agent.requests, agent.pricedRequests, agent.actualUsd], [1, 0, 0]);
   }
-  const unpricedOther = addAgentReply(DEFAULTS, record({ routedModel: 'gpt-x' }), usage('claude-opus-5-5'), '5m');
+  const unpricedOther = addAgentReply(DEFAULTS, record({ coreModel: 'gpt-x' }), usage('claude-opus-5-5'), '5m');
   assert.equal(unpricedOther.pricedRequests, 0);
 });
 
 test('an agent counts once across flushes, and its requests and prices each time', () => {
-  let agent = addAgentReply(DEFAULTS, record({ respawn: true }), usage('claude-opus-5-5'), '5m');
+  let agent = addAgentReply(DEFAULTS, record({ respawn: true }), usage('claude-haiku-5-5'), '5m');
   let store = recordAgent(emptySubagentStore(), agent, 1_000);
-  agent = addAgentReply(DEFAULTS, flushedAgent(agent), usage('claude-opus-5-5'), '5m');
+  agent = addAgentReply(DEFAULTS, flushedAgent(agent), usage('claude-haiku-5-5'), '5m');
   store = recordAgent(store, agent, 2_000);
   assert.equal(recordAgent(store, flushedAgent(agent), 3_000), store);
-  const counts = store.routed.shadow.Explore;
+  const counts = store.routed.on.Explore;
   assert.deepEqual(
     [counts.agents, counts.differs, counts.requests, counts.respawns, counts.failures, counts.choices],
     [1, 1, 2, 1, 0, { haiku: 1 }],
@@ -249,14 +248,14 @@ test('an agent counts once across flushes, and its requests and prices each time
 
 test('a decision that kept core’s model does not count as moved, and a classifier failure is counted', () => {
   const kept = record({ choice: 'core', routedModel: 'claude-opus-5-5', failed: true });
-  const counts = recordAgent(emptySubagentStore(), kept, 1).routed.shadow.Explore;
+  const counts = recordAgent(emptySubagentStore(), kept, 1).routed.on.Explore;
   assert.deepEqual([counts.agents, counts.differs, counts.failures, counts.choices], [1, 0, 1, { core: 1 }]);
 });
 
 test('pass-throughs count by reason, and stores merge, reset and read back from bad values', () => {
   const passed = { ...record({ pass: 'workflow', choice: null }), requests: 3, pricedRequests: 3, actualUsd: 0.5 };
   const one = recordAgent(emptySubagentStore(), passed, 10);
-  const two = recordAgent(recordAgent(emptySubagentStore(), record({ mode: 'on' }), 20), passed, 20);
+  const two = recordAgent(recordAgent(emptySubagentStore(), record(), 20), passed, 20);
   const merged = mergeSubagentStores([one, two, null, { version: 9 }]);
   assert.deepEqual(merged.passed.workflow, { agents: 2, requests: 6, pricedRequests: 6, usd: 1 });
   assert.equal(merged.routed.on.Explore.agents, 1);
@@ -267,8 +266,25 @@ test('pass-throughs count by reason, and stores merge, reset and read back from 
   const bad = {
     ...one,
     passed: { workflow: { agents: -1 }, fork: 'x' },
-    routed: { shadow: { Explore: { agents: 1 } } },
+    routed: { on: { Explore: { agents: 1 } } },
   };
-  assert.deepEqual(readSubagentStore(bad), { version: 1, since: 10, routed: { shadow: {}, on: {} }, passed: {} });
+  assert.deepEqual(readSubagentStore(bad), { version: 1, since: 10, routed: { on: {} }, passed: {} });
   assert.deepEqual(readSubagentStore('junk'), emptySubagentStore());
+});
+
+test('a store saved before 1.10.1 keeps its routed counts and drops the shadow ones', () => {
+  const counts = {
+    agents: 2,
+    differs: 1,
+    requests: 4,
+    pricedRequests: 4,
+    coreUsd: 1,
+    routedUsd: 0.5,
+    respawns: 0,
+    failures: 0,
+  };
+  const saved = { version: 1, since: 10, routed: { shadow: { Plan: counts }, on: { Explore: counts } }, passed: {} };
+  const read = readSubagentStore(saved);
+  assert.deepEqual(read.routed, { on: { Explore: { ...counts, choices: {} } } });
+  assert.deepEqual(mergeSubagentStores([saved]).routed, read.routed);
 });

@@ -651,7 +651,6 @@ async function decideTurn($, router, e, signal, step) {
             estimate: selected.decision.estimate ?? null,
             activityChoice: activity.predicted,
             activityProbabilities: result.advice?.activity?.probabilities ?? null,
-            wouldRoute: selected.decision.wouldRoute ?? null,
           }
         : {}),
     });
@@ -813,9 +812,6 @@ async function recordActivity($, router, turn) {
         tierSwitches: turn.switched === 'tier' ? 1 : 0,
         activitySwitches: turn.switched === 'activity' ? 1 : 0,
         lateral: turn.lateral,
-        wouldDiffer: turn.wouldDiffer,
-        wouldUsd: turn.wouldUsd,
-        shadow: turn.mode === 'shadow',
       }),
     });
     const resets = router.statsResets;
@@ -831,8 +827,6 @@ async function recordActivity($, router, turn) {
       observed,
       runEnded: ended,
       lateral: turn.lateral,
-      wouldDiffer: turn.wouldDiffer,
-      wouldUsd: turn.wouldUsd,
     });
     const measured = recordMetrics(own.record, {
       classifier: turn.classifier,
@@ -858,7 +852,7 @@ async function recordActivity($, router, turn) {
 async function flushRun($, run) {
   try {
     const store = readStore(await $.store.get(STORE_KEY));
-    const ended = { predicted: null, observed: null, runEnded: run, lateral: null, wouldDiffer: null, wouldUsd: null };
+    const ended = { predicted: null, observed: null, runEnded: run, lateral: null };
     await $.store.set(STORE_KEY, recordStore(store, ended));
   } catch {}
 }
@@ -946,41 +940,28 @@ async function decideSpawn($, router, cfg, e, definition, signal) {
 }
 
 // One model per subagent, chosen before its cache exists. `on` waits for the decision and sends its model, which
-// Claude Code uses in place of the Agent call's `model` and the agent's frontmatter. `shadow` spawns as Claude Code
-// would at once and records the decision once it is in, so it never delays an agent's start. Routing off or
-// unavailable keeps every model Claude Code chooses, and records nothing.
+// Claude Code uses in place of the Agent call's `model` and the agent's frontmatter. Routing off or unavailable keeps
+// every model Claude Code chooses, and records nothing.
 async function spawnAgent($, router, e, next) {
   const cfg = router.config;
-  const mode = cfg.subagentRouting;
-  if (mode === 'off') return next(e);
+  if (cfg.subagentRouting === 'off') return next(e);
   const view = router.view ?? (await readView($, router));
   if (view.phase === 'unavailable' || (await modeOf($, router, view.mode)) === 'manual') return next(e);
   const definition = await agentDefinition($, router, e);
   const pass = passReason(cfg, e, definition);
-  const deciding = pass ? null : decideSpawn($, router, cfg, e, definition, next.signal).catch(() => null);
-  const decided = mode === 'on' ? await deciding : null;
-  const routed = Boolean(decided?.model);
-  const result = await next(routed ? { ...e, model: decided.model } : e);
-  if (!result.agentId) return result;
-  // In shadow the agent may reply, and even finish, before the decision lands: a pending entry keeps its replies.
-  if (mode !== 'on' && deciding !== null)
-    router.agents.set(result.agentId, { pending: true, usages: [], finished: false });
-  try {
-    const decision = mode === 'on' ? decided : await deciding;
-    if (pass || decision) await noteSpawn($, router, { cfg, mode, e, pass, decision, routed, result, definition });
-    else router.agents.delete(result.agentId);
-  } catch {
-    if (router.agents.get(result.agentId)?.pending) router.agents.delete(result.agentId);
-  }
+  const decision = pass ? null : await decideSpawn($, router, cfg, e, definition, next.signal).catch(() => null);
+  const routed = Boolean(decision?.model);
+  const result = await next(routed ? { ...e, model: decision.model } : e);
+  if (result.agentId && (pass || decision))
+    await noteSpawn($, router, { cfg, e, pass, decision, routed, result, definition }).catch(() => {});
   return result;
 }
 
-// The spawn's record, kept until the session ends. In `on` core's model is an estimate (coreModelOf); otherwise it is
-// the model the agent started on.
-async function noteSpawn($, router, { cfg, mode, e, pass, decision, routed, result, definition }) {
+// The spawn's record, kept until the session ends. When routed, core's model is an estimate (coreModelOf); otherwise it
+// is the model the agent started on.
+async function noteSpawn($, router, { cfg, e, pass, decision, routed, result, definition }) {
   const parentKey = `${e.parentAgentId ?? 'main'} ${e.subagentType}`;
   const finishedAt = router.finished.get(parentKey);
-  const ttl = await subagentTtlOf($).catch(() => null);
   const coreModel = routed
     ? coreModelOf(cfg, e, {
         envModel: await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL'),
@@ -990,7 +971,6 @@ async function noteSpawn($, router, { cfg, mode, e, pass, decision, routed, resu
     : result.model;
   const record = spawnRecord({
     sessionId: await $.session.id(),
-    mode,
     spawn: e,
     pass,
     choice: decision?.choice ?? null,
@@ -999,14 +979,7 @@ async function noteSpawn($, router, { cfg, mode, e, pass, decision, routed, resu
     failed: decision?.failed,
     respawn: Number.isFinite(finishedAt) && Date.now() - finishedAt < RESPAWN_WINDOW_MS,
   });
-  // Read after the last await, so no reply lands in the pending entry after its replay.
-  const pending = router.agents.get(result.agentId);
-  const replies = pending?.pending ? pending.usages : [];
-  router.agents.set(
-    result.agentId,
-    replies.reduce((agent, usage) => addAgentReply(cfg, agent, usage, ttl), { ...record, parentKey }),
-  );
-  if (pending?.finished) await finishAgent($, router, result.agentId);
+  router.agents.set(result.agentId, { ...record, parentKey });
 }
 
 // A subagent's prompt-cache lifetime, by Claude Code's rule for requests outside the main conversation.
@@ -1028,8 +1001,7 @@ async function* stepAgent($, router, e, next) {
     try {
       const ttl = await subagentTtlOf($);
       const agent = router.agents.get(e.agentId);
-      if (agent?.pending) agent.usages.push(response.usage);
-      else if (agent) router.agents.set(e.agentId, addAgentReply(router.config, agent, response.usage, ttl));
+      if (agent) router.agents.set(e.agentId, addAgentReply(router.config, agent, response.usage, ttl));
     } catch {}
   }
   return response;
@@ -1039,11 +1011,6 @@ async function* stepAgent($, router, e, next) {
 async function finishAgent($, router, agentId) {
   const agent = router.agents.get(agentId);
   if (!agent) return;
-  // A pending agent is flushed when its decision lands (noteSpawn).
-  if (agent.pending) {
-    agent.finished = true;
-    return;
-  }
   router.finished.set(agent.parentKey, Date.now());
   router.agents.set(agentId, flushedAgent(agent));
   await flushSubagents($, router, [agent]);
@@ -1225,7 +1192,7 @@ function paneActions($, router, view) {
       router.run = null;
       router.afterDown = null;
       router.turnSavings.clear();
-      for (const [id, agent] of router.agents) if (!agent.pending) router.agents.set(id, flushedAgent(agent));
+      for (const [id, agent] of router.agents) router.agents.set(id, flushedAgent(agent));
       const clear = (key, value) =>
         $.store
           .set(key, value)
@@ -1357,7 +1324,7 @@ export function register(on, options) {
     await $.command.register({
       name: 'router',
       description: 'Open the Router pane, or switch routing: auto, off, pin <tier>, activities <mode>.',
-      argumentHint: '[auto|off|pin <tier>|activities off|shadow|on]',
+      argumentHint: '[auto|off|pin <tier>|activities off|on]',
       immediate: true,
     });
     const model = await $.session.model();

@@ -4,7 +4,7 @@ declare module 'claude-code' {
   // What kind of work a turn does (ACTIVITIES in lib/config.mjs); 'uncertain' only as a classifier answer.
   type RouterActivity = 'code' | 'debug' | 'explore' | 'plan' | 'review' | 'ops' | 'docs';
   type RouterActivityAnswer = RouterActivity | 'uncertain';
-  type RouterActivityMode = 'off' | 'shadow' | 'on';
+  type RouterActivityMode = 'off' | 'on';
   // A finished turn's bucket, read from its tool calls.
   type RouterObserved = 'code' | 'docs' | 'ops' | 'read' | 'talk';
   // A route change inside the incumbent's tier: taken, refused (does not pay back, a hold, the cash gate), or none.
@@ -19,28 +19,6 @@ declare module 'claude-code' {
       choice: RouterActivityAnswer;
       probabilities: Record<RouterActivityAnswer, number>;
     } | null;
-  }
-  // A next-request cost difference in USD at configured list prices; negative is cheaper.
-  interface RouterUsdRange {
-    minUsd: number;
-    maxUsd: number;
-  }
-  // What `on` would do, computed in `shadow`. `model` is a model id, as `decision.model`. `difference` prices its next
-  // request against the applied route's; null when the routes match or there is no measured request yet.
-  interface RouterWouldRoute {
-    activity: RouterActivity | null;
-    tier: RouterTier | null;
-    model: string;
-    effort: string | number | null;
-    reason: string;
-    lateral: RouterLateral;
-    difference: RouterUsdRange | null;
-  }
-  // Shadow turns, those `on` would route differently, and of those the ones with a `difference`, summed.
-  interface RouterActivityShadow extends RouterUsdRange {
-    differs: number;
-    turns: number;
-    estimated: number;
   }
   interface RouterActivityCounts {
     turns: number;
@@ -57,11 +35,9 @@ declare module 'claude-code' {
   interface RouterActivitySession {
     byActivity: Partial<Record<RouterActivity | 'none', RouterActivityCounts>>;
     switches: { tier: number; activity: number };
-    // Lateral moves taken and refused (by economics, a hold or the cash gate), outside shadow only; absent in views saved
-    // by 1.7.0.
+    // Lateral moves taken and refused (by economics, a hold or the cash gate); absent in views saved by 1.7.0.
     lateral?: { taken: number; refused: number };
     agreement: { matched: number; total: number };
-    shadow: RouterActivityShadow;
   }
   // Cross-session counts under store key 'activity:stats:v1'. `runs` buckets run lengths 1, 2, 3, 4, 5+.
   interface RouterActivityStore {
@@ -69,8 +45,6 @@ declare module 'claude-code' {
     confusion: Partial<Record<RouterActivityAnswer | 'none', Partial<Record<RouterObserved, number>>>>;
     runs: Partial<Record<RouterActivity, [number, number, number, number, number]>>;
     lateral: { taken: number; refused: number };
-    // A 1.6.0 store has `differs` and `turns` only; readStore fills the rest with zeros.
-    shadow: RouterActivityShadow;
   }
   // Cross-session readings under store key 'activity:metrics:v1'. Classifier wait per turn by classifier id, in
   // LATENCY_BOUNDS buckets plus one above; at most 8 ids. Cheaper activity moves taken in 'on' and the escalations that
@@ -165,7 +139,7 @@ declare module 'claude-code' {
   interface RouterSubagentStore {
     version: 1;
     since: number | null;
-    routed: { shadow: Record<string, RouterSubagentCounts>; on: Record<string, RouterSubagentCounts> };
+    routed: { on: Record<string, RouterSubagentCounts> };
     passed: Partial<Record<'fork' | 'explicit' | 'teammate' | 'workflow' | 'unlisted', RouterSubagentPassed>>;
   }
   interface RouterView {
@@ -196,11 +170,10 @@ declare module 'claude-code' {
     estimate?: RouterEstimate | null;
     comparison?: RouterComparison | null;
     probabilities?: Partial<Record<RouterTier | 'uncertain', number>> | null;
-    // The turn's activity: the applied one in 'on', the classifier's accepted label in 'shadow'.
+    // The turn's activity, applied in 'on'.
     activity?: RouterActivity | null;
     activityChoice?: RouterActivityAnswer | null;
     activityProbabilities?: Partial<Record<RouterActivityAnswer, number>> | null;
-    wouldRoute?: RouterWouldRoute | null;
     history?: number[];
     tiers?: (RouterTier | null)[];
     // Aligned with `history` and `tiers`.
@@ -239,8 +212,6 @@ declare module 'claude-code' {
     lastRoute: RouterTier;
     // The activity of the route running now; absent in loops saved before 1.6.
     lastActivity?: RouterActivity | null;
-    // Shadow mode only: the cell and policy state `on` would run with, so each would-route continues the last one.
-    would?: { lastRoute: RouterTier; lastActivity: RouterActivity | null; state: RouterPolicyState } | null;
     state: RouterPolicyState;
     models: Record<string, { lastAt: number; prefixTokens: number }>;
     resolutions: Record<string, string>;
@@ -264,12 +235,11 @@ declare module 'claude-code' {
       effort: string | number | null;
       estimate?: RouterEstimate | null;
       comparison?: RouterComparison | null;
-      // The applied activity; `wouldRoute` is set only in shadow mode.
+      // The applied activity.
       activity?: RouterActivity | null;
       lateral?: RouterLateral;
       // A failure asked for an escalation this turn, also one the cash gate held or context-fit replaced.
       escalated?: boolean;
-      wouldRoute?: RouterWouldRoute | null;
       pinned: boolean;
       requestedPin: RouterTier | null;
     } | null;

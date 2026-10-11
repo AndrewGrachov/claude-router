@@ -56,7 +56,7 @@ The script writes aggregate counts, reason histograms, route transitions, and sh
 
 Activity routing has no measured result. The replay above predates it and covers tiers only. It is `on` by default since 1.7, with defaults chosen from Anthropic's published benchmarks and a list-price replay of one developer's sessions; [Activity routing](activity-routing.md#what-the-estimates-mean) gives that replay and its limits. The pane counts turns, requests, switches, and the turns `on` would route differently, with a configured list-price estimate of those turns' next requests, not a measured saving. Two checks look at the classifier's activity label.
 
-The figures plan §11 tracks (tool agreement of at least 80% on `code` against `ops` and `explore`, Jev p95 latency of at most 450 ms, at most 1 tool-error escalation in 10 cheaper activity moves, a negative would-route estimate in `shadow`, the number of activity switches) are read from the Usage tab's **ACROSS SESSIONS** block, which shows the counts kept since the last reset: **Code/ops/explore** for the tool agreement on turns the classifier answered `code`, `ops` or `explore`, **Agreement** and **Mismatch** for all of them, **Activity moves** for moves inside a tier taken and refused (a refusal by a hold or the credits cap included), **Escalations** for the tool-error escalations that followed a cheaper activity move in `on` while the turns stayed on its route in `on` (turning routing off, a turn with routing off, or a turn in `shadow` or `off` ends the watch, a pin in between does not, and an escalation the credits cap held counts), **Latency** for the active classifier's p95 wait, **Shadow** for the would-route count and estimate. Latency is kept in fixed buckets, so the p95 reads as a bound (`≤ 350 ms`); it is the wait for the classifier's answer, transient retries included, without the routing after it, so it compares with the probe's p95 below, and is not recorded with activity routing `off`. `/router` without a UI surface prints both agreements. The underlying counts are the `activity:stats:v1` store and the per-session `activity:metrics:v1:<session id>` records described in [Architecture](architecture.md).
+The figures plan §11 tracks (tool agreement of at least 80% on `code` against `ops` and `explore`, Jev p95 latency of at most 450 ms, at most 1 tool-error escalation in 10 cheaper activity moves, the number of activity switches) are read from the Usage tab's **ACROSS SESSIONS** block, which shows the counts kept since the last reset: **Code/ops/explore** for the tool agreement on turns the classifier answered `code`, `ops` or `explore`, **Agreement** and **Mismatch** for all of them, **Activity moves** for moves inside a tier taken and refused (a refusal by a hold or the credits cap included), **Escalations** for the tool-error escalations that followed a cheaper activity move in `on` while the turns stayed on its route in `on` (turning routing off, a turn with routing off, or a turn in `off` ends the watch, a pin in between does not, and an escalation the credits cap held counts), **Latency** for the active classifier's p95 wait. Latency is kept in fixed buckets, so the p95 reads as a bound (`≤ 350 ms`); it is the wait for the classifier's answer, transient retries included, without the routing after it, so it compares with the probe's p95 below, and is not recorded with activity routing `off`. `/router` without a UI surface prints both agreements. The underlying counts are the `activity:stats:v1` store and the per-session `activity:metrics:v1:<session id>` records described in [Architecture](architecture.md).
 
 ### Tool agreement
 
@@ -94,7 +94,7 @@ Agreement is a weak check. It tells `code` from `ops` and `explore` well, but no
 node scripts/probe-activity.mjs [classifier]
 ```
 
-The script sends each prompt to one classifier as the router would ask it, with activity routing forced to `shadow`. It reads credentials as `probe-classifier.mjs` does and needs a classifier you can reach. The run is billed on a paid classifier, and it is run by hand, not in CI. It writes accuracy, an expected-by-answered confusion matrix, p50 and p95 latency against the classifier's deadline, and error counts to `experiments/mod-router/results/activity-probe-<classifier>.json`. For Ollama the latency covers both requests. It never prints a key.
+The script sends each prompt to one classifier as the router would ask it, with activity routing forced to `on`. It reads credentials as `probe-classifier.mjs` does and needs a classifier you can reach. The run is billed on a paid classifier, and it is run by hand, not in CI. It writes accuracy, an expected-by-answered confusion matrix, p50 and p95 latency against the classifier's deadline, and error counts to `experiments/mod-router/results/activity-probe-<classifier>.json`. For Ollama the latency covers both requests. It never prints a key.
 
 Five probe results are checked in, run on 2026-10-09 and 2026-10-10 (UTC) with the synthetic set above: Jev against the live typesafe.ai API, OpenAI against the live Decisions API, Clef and Clef Flash against the live Cloudflare API, Ollama with `qwen3.5:9b` on an Apple M2 Pro laptop:
 
@@ -136,21 +136,20 @@ Limits:
 
 ## Subagent routing
 
-Subagent routing has no measured result over time yet. It is `on` by default since 1.9; `shadow` makes and records the decision while the agent runs on the model Claude Code gives it. The Usage tab's **SUBAGENTS** section shows the counts kept across sessions since the last reset:
+Subagent routing has no measured result over time yet. It is `on` by default since 1.9. The Usage tab's **SUBAGENTS** section shows the counts kept across sessions since the last reset:
 
-- Per routed type and mode: agents; **moved**, the agents whose decided model differs from the one they ran on; requests per agent; respawns; the choices by model; classifier failures; and `core → routed`, the list price of the agents' tokens on core's model against the decided one.
+- Per routed type: agents; **moved**, the agents whose decided model differs from the one they ran on; requests per agent; respawns; the choices by model; classifier failures; and `core → routed`, the list price of the agents' tokens on core's model against the decided one.
 - **Not routed**, the spawns that passed through, by reason (`fork`, `workflow`, `explicit`, `teammate`, `unlisted`, `pinned`, `unknown`), priced on the model they ran on. This is the share of subagent spend that routing cannot reach.
 
 Method:
 
-- In `shadow`, `core` prices each reply on the model it ran on, and `routed` prices the same tokens on the decided model. A subagent starts with a cold cache on one model and keeps it, so its own token counts on another model are a fair counterfactual. `ratesAt` applies Haiku 5.5's 5x rate above 100,000 prompt tokens. Explore agents often pass that, so Haiku can cost more than its base price suggests.
-- In `on`, `routed` is the reply on the routed model and `core` the same tokens on core's model as the router estimates it: `CLAUDE_CODE_SUBAGENT_MODEL`, except for Explore and Plan without `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, else the parent's model.
+- `routed` is the reply on the routed model and `core` the same tokens on core's model as the router estimates it: `CLAUDE_CODE_SUBAGENT_MODEL`, except for Explore and Plan without `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, else the parent's model. A subagent starts with a cold cache on one model and keeps it, so its own token counts on another model are a fair counterfactual. `ratesAt` applies Haiku 5.5's 5x rate above 100,000 prompt tokens. Explore agents often pass that, so Haiku can cost more than its base price suggests.
 - Cache writes are priced at the subagent lifetime: five minutes unless `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, `subagentPromptCacheTtl` or `ENABLE_PROMPT_CACHING_1H` say otherwise, on a subscription too.
-- Shadow cannot see quality. The decided model never ran, so a retry or an escalation it would have caused is invisible. Two proxies are recorded in both modes, so an `on` period can be compared with the shadow baseline: requests per agent, and **respawns**, a spawn of the same type by the same parent within 10 minutes after one finished.
+- The counts cannot see quality. Two proxies stand in for it: requests per agent, and **respawns**, a spawn of the same type by the same parent within 10 minutes after one finished.
 
 Checks:
 
-- `test/subagents.test.mjs` covers each pass reason, the pin rule, the classify mapping, core's model estimate, the subagent lifetime, Haiku's long-context price, and the store's merge, reset and bad values. `test/hook-subagents.test.mjs` covers `shadow` (no change, decision recorded), `on` (the routed model), a fork, an explicit model, a teammate, a workflow agent and a pinned project agent (each passes), a classifier failure (core's model), parallel spawns, a spawn-path pause that leaves main routing alone, respawns, session end, Reset stats and the Usage tab.
+- `test/subagents.test.mjs` covers each pass reason, the pin rule, the classify mapping, core's model estimate, the subagent lifetime, Haiku's long-context price, and the store's merge, reset and bad values. `test/hook-subagents.test.mjs` covers `on` (the routed model), a fork, an explicit model, a teammate, a workflow agent and a pinned project agent (each passes), a classifier failure (core's model), parallel spawns, a spawn-path pause that leaves main routing alone, respawns, session end, Reset stats and the Usage tab.
 - `experiments/mod-router/results/agent-spawn-probe.json` records what Claude Code 2.1.296 does with a spawn's model, frontmatter and workflow agents.
 - `experiments/mod-router/results/subagent-routing-live.json` is a live `on` run on 2026-10-10 with Sonnet as the parent. Explore was sent Haiku and ran on it. general-purpose was classified `standard`. A pinned project agent and an explicit `opus` call passed through. The store counted each one.
 
@@ -160,7 +159,7 @@ When to turn it `on`:
 - the choices look right for the tasks: `light` for searches and reads, `heavy` rarely;
 - **Not routed** leaves enough routable spend to bother.
 
-With `on`, keep it if requests per agent and respawns per type stay no higher than in a `shadow` week. Otherwise go back to `shadow` and change `types` or `heavyMass`, or exclude a type with `null`.
+Keep it if requests per agent and respawns per type stay no higher than before you turned it on. Otherwise change `types` or `heavyMass`, exclude a type with `null`, or set `subagentRouting` to `off`.
 
 Limits:
 

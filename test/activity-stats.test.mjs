@@ -32,17 +32,7 @@ const turn = (extra = {}) => ({
   outputTokens: 200,
   tierSwitches: 0,
   activitySwitches: 0,
-  wouldDiffer: null,
-  wouldUsd: null,
-  shadow: false,
   ...extra,
-});
-const shadowOf = (differs, turns, estimated = 0, minUsd = 0, maxUsd = 0) => ({
-  differs,
-  turns,
-  estimated,
-  minUsd,
-  maxUsd,
 });
 
 test('every activity allows a set of buckets, and agreement follows it', () => {
@@ -136,17 +126,11 @@ test('session agreement compares the classifier answer, not the route label, and
   assert.deepEqual(session.agreement, { matched: 3, total: 4 });
 });
 
-test('session switches and shadow counters add up', () => {
+test('session switches add up', () => {
   let session = emptySession();
-  for (const extra of [
-    { tierSwitches: 1, shadow: true, wouldDiffer: true },
-    { activitySwitches: 2, shadow: true, wouldDiffer: false },
-    { shadow: true, wouldDiffer: null },
-    { tierSwitches: 1, activitySwitches: 1, wouldDiffer: true },
-  ])
+  for (const extra of [{ tierSwitches: 1 }, { activitySwitches: 2 }, {}, { tierSwitches: 1, activitySwitches: 1 }])
     session = recordTurn(session, turn(extra));
   assert.deepEqual(session.switches, { tier: 2, activity: 3 });
-  assert.deepEqual(session.shadow, shadowOf(1, 3));
 });
 
 test('session lateral moves count taken and refused, also on a 1.7.0 view without them', () => {
@@ -155,36 +139,6 @@ test('session lateral moves count taken and refused, also on a 1.7.0 view withou
   for (const lateral of ['taken', 'refused', 'refused', null, 'bogus'])
     session = recordTurn(session, turn({ lateral }));
   assert.deepEqual(session.lateral, { taken: 1, refused: 2 });
-  for (const lateral of ['taken', 'refused'])
-    session = recordTurn(session, turn({ lateral, shadow: true, wouldDiffer: false }));
-  assert.deepEqual(session.lateral, { taken: 1, refused: 2 }, 'the would-route’s moves in shadow are not decisions');
-});
-
-test('the shadow estimate sums the ranges of differing turns only, and counts the turns it covers', () => {
-  const range = (minUsd, maxUsd) => ({ minUsd, maxUsd });
-  const cases = [
-    { wouldDiffer: true, wouldUsd: range(-0.25, -0.125) },
-    { wouldDiffer: true, wouldUsd: range(0.5, 1) },
-    { wouldDiffer: true, wouldUsd: null },
-    { wouldDiffer: false, wouldUsd: range(1, 2) },
-    { wouldDiffer: true, wouldUsd: range(Number.NaN, 1) },
-  ];
-  let session = emptySession();
-  let store = emptyStore();
-  for (const c of cases) {
-    session = recordTurn(session, turn({ shadow: true, ...c }));
-    store = recordStore(store, { predicted: 'code', observed: 'code', runEnded: null, lateral: null, ...c });
-  }
-  session = recordTurn(session, turn({ shadow: false, wouldDiffer: true, wouldUsd: range(9, 9) }));
-  assert.deepEqual(session.shadow, shadowOf(4, 5, 2, 0.25, 0.875));
-  assert.deepEqual(store.shadow, shadowOf(4, 5, 2, 0.25, 0.875));
-});
-
-test('a session view saved by 1.6.0 keeps counting with the estimate', () => {
-  const old = { ...emptySession(), shadow: { differs: 2, turns: 4 } };
-  const shadow = recordTurn(old, turn({ shadow: true, wouldDiffer: true, wouldUsd: { minUsd: -0.5, maxUsd: -0.25 } }));
-  assert.deepEqual(shadow.shadow, shadowOf(3, 5, 1, -0.5, -0.25));
-  assert.deepEqual(recordTurn(old, turn()).shadow, shadowOf(2, 4));
 });
 
 test('recordTurn returns a new session and treats bad numbers as zero', () => {
@@ -215,7 +169,7 @@ test('the store counts a predicted x observed matrix, with none for a missing pr
     ['uncertain', 'talk'],
     [null, 'read'],
   ])
-    store = recordStore(store, { predicted, observed, runEnded: null, lateral: null, wouldDiffer: null });
+    store = recordStore(store, { predicted, observed, runEnded: null, lateral: null });
   assert.deepEqual(store.confusion, {
     code: { code: 2, ops: 1 },
     uncertain: { talk: 1 },
@@ -231,23 +185,15 @@ test('the store buckets run lengths 1, 2, 3, 4 and 5 or more', () => {
       observed: 'talk',
       runEnded: { activity: 'ops', length },
       lateral: null,
-      wouldDiffer: null,
     });
   assert.deepEqual(store.runs, { ops: [1, 2, 1, 1, 3] });
 });
 
-test('the store counts lateral outcomes and the shadow readout', () => {
+test('the store counts lateral outcomes', () => {
   let store = emptyStore();
-  for (const [lateral, wouldDiffer] of [
-    ['taken', true],
-    ['refused', false],
-    ['refused', null],
-    [null, true],
-    ['sideways', undefined],
-  ])
-    store = recordStore(store, { predicted: 'ops', observed: 'ops', runEnded: null, lateral, wouldDiffer });
+  for (const lateral of ['taken', 'refused', 'refused', null, 'sideways'])
+    store = recordStore(store, { predicted: 'ops', observed: 'ops', runEnded: null, lateral });
   assert.deepEqual(store.lateral, { taken: 1, refused: 2 });
-  assert.deepEqual(store.shadow, shadowOf(2, 3));
 });
 
 test('the store drops labels it does not know, so its key set stays fixed', () => {
@@ -256,7 +202,6 @@ test('the store drops labels it does not know, so its key set stays fixed', () =
     observed: 'code',
     runEnded: { activity: 'uncertain', length: 2 },
     lateral: null,
-    wouldDiffer: null,
   });
   assert.deepEqual(store, emptyStore());
   const badObserved = recordStore(emptyStore(), {
@@ -264,7 +209,6 @@ test('the store drops labels it does not know, so its key set stays fixed', () =
     observed: 'sleep',
     runEnded: { activity: 'code', length: 0 },
     lateral: null,
-    wouldDiffer: null,
   });
   assert.deepEqual(badObserved, emptyStore());
 });
@@ -276,7 +220,6 @@ test('recordStore does not change the store it was given', () => {
       observed: 'code',
       runEnded: { activity: 'code', length: 2 },
       lateral: 'taken',
-      wouldDiffer: true,
     }),
   );
   const copy = structuredClone(store);
@@ -285,7 +228,6 @@ test('recordStore does not change the store it was given', () => {
     observed: 'ops',
     runEnded: { activity: 'code', length: 9 },
     lateral: 'refused',
-    wouldDiffer: false,
   });
   assert.deepEqual(store, copy);
 });
@@ -296,17 +238,9 @@ test('readStore keeps a valid store and falls back to an empty one for any bad s
     confusion: { code: { code: 4, ops: 1 }, none: { talk: 2 } },
     runs: { code: [1, 0, 2, 0, 3] },
     lateral: { taken: 2, refused: 1 },
-    shadow: shadowOf(3, 10, 2, -0.5, 0.25),
   };
   assert.deepEqual(readStore(valid), valid);
   assert.deepEqual(readStore(structuredClone(emptyStore())), emptyStore());
-  const before = { ...valid, shadow: { differs: 3, turns: 10 } };
-  assert.deepEqual(
-    readStore(before),
-    { ...valid, shadow: shadowOf(3, 10) },
-    'a 1.6.0 store loads with a zero estimate',
-  );
-  assert.deepEqual(before.shadow, { differs: 3, turns: 10 }, 'the value read is not changed');
   const mutate = (change) => {
     const copy = structuredClone(valid);
     change(copy);
@@ -337,29 +271,39 @@ test('readStore keeps a valid store and falls back to an empty one for any bad s
     ['a non-count run bucket', mutate((v) => (v.runs.code[2] = null))],
     ['lateral missing a key', mutate((v) => delete v.lateral.refused)],
     ['lateral with an extra key', mutate((v) => (v.lateral.other = 1))],
-    ['shadow missing a key', mutate((v) => delete v.shadow.turns)],
-    ['shadow as a number', mutate((v) => (v.shadow = 7))],
-    ['part of the estimate', mutate((v) => delete v.shadow.maxUsd)],
-    ['an estimate as a string', mutate((v) => (v.shadow.minUsd = '-0.5'))],
-    ['an infinite estimate', mutate((v) => (v.shadow.maxUsd = Number.POSITIVE_INFINITY))],
-    ['a fractional estimated count', mutate((v) => (v.shadow.estimated = 1.5))],
-    ['shadow with an extra key', mutate((v) => (v.shadow.saved = 1))],
   ])
     assert.deepEqual(readStore(value), emptyStore(), name);
 });
 
-test('the stats store keeps the 1.7.0 key set, which 1.7.0 reads back, whatever the turn measured', () => {
+test('a store saved before 1.10.1 reads back without its shadow readout and keeps its counts', () => {
+  const saved = {
+    version: 1,
+    confusion: { code: { code: 4 } },
+    runs: { code: [1, 0, 2, 0, 3] },
+    lateral: { taken: 2, refused: 1 },
+  };
+  for (const shadow of [
+    { differs: 3, turns: 10 },
+    { differs: 3, turns: 10, estimated: 2, minUsd: -0.5, maxUsd: 0.25 },
+    7,
+  ]) {
+    const before = { ...saved, shadow };
+    assert.deepEqual(readStore(before), saved);
+    assert.deepEqual(before.shadow, shadow, 'the value read is not changed');
+  }
+});
+
+test('the stats store holds only version, confusion, runs and lateral, whatever the turn measured', () => {
   const store = recordStore(emptyStore(), {
     predicted: 'code',
     observed: 'code',
     runEnded: { activity: 'code', length: 2 },
     lateral: 'taken',
-    wouldDiffer: true,
     classifier: 'jev',
     adviceMs: 240,
     downMove: 'moved',
   });
-  assert.deepEqual(Object.keys(store), ['version', 'confusion', 'runs', 'lateral', 'shadow']);
+  assert.deepEqual(Object.keys(store), ['version', 'confusion', 'runs', 'lateral']);
   assert.deepEqual(readStore(store), store);
 });
 
@@ -470,7 +414,7 @@ test('a run closed by advanceRun feeds the store', () => {
   for (const predicted of ['ops', 'ops', 'ops', 'code']) {
     const step = advanceRun(run, predicted);
     run = step.run;
-    store = recordStore(store, { predicted, observed: 'ops', runEnded: step.ended, lateral: null, wouldDiffer: null });
+    store = recordStore(store, { predicted, observed: 'ops', runEnded: step.ended, lateral: null });
   }
   assert.deepEqual(store.runs, { ops: [0, 0, 1, 0, 0] });
 });
@@ -488,7 +432,7 @@ test('turnActivity labels a routed turn per mode and names what moved the route'
       advice('ops', 0.81),
       sonnet,
       { ...haiku, activity: 'ops', reason: 'activity-down', lateral: 'taken' },
-      { answer: 'ops', label: 'ops', predicted: 'ops', switched: 'activity', lateral: 'taken', wouldDiffer: null },
+      { answer: 'ops', label: 'ops', predicted: 'ops', switched: 'activity', lateral: 'taken' },
     ],
     [
       'on: a refused move keeps the route',
@@ -496,7 +440,7 @@ test('turnActivity labels a routed turn per mode and names what moved the route'
       advice('ops', 0.81),
       sonnet,
       { ...sonnet, activity: 'code', reason: 'activity-pending', lateral: 'refused' },
-      { answer: 'ops', label: 'code', predicted: 'ops', switched: null, lateral: 'refused', wouldDiffer: null },
+      { answer: 'ops', label: 'code', predicted: 'ops', switched: null, lateral: 'refused' },
     ],
     ...['hold', 'cash-gate'].map((reason) => [
       `on: a move refused by ${reason} is counted`,
@@ -504,7 +448,7 @@ test('turnActivity labels a routed turn per mode and names what moved the route'
       advice('ops', 0.81),
       sonnet,
       { ...sonnet, activity: 'code', reason, lateral: 'refused' },
-      { answer: 'ops', label: 'code', predicted: 'ops', switched: null, lateral: 'refused', wouldDiffer: null },
+      { answer: 'ops', label: 'code', predicted: 'ops', switched: null, lateral: 'refused' },
     ]),
     [
       'on: a tier hold without a lateral move counts nothing',
@@ -512,7 +456,7 @@ test('turnActivity labels a routed turn per mode and names what moved the route'
       advice('ops', 0.81),
       sonnet,
       { ...sonnet, activity: 'code', reason: 'hold', lateral: null },
-      { answer: 'ops', label: 'code', predicted: 'ops', switched: null, lateral: null, wouldDiffer: null },
+      { answer: 'ops', label: 'code', predicted: 'ops', switched: null, lateral: null },
     ],
     [
       'on: a tier move',
@@ -520,7 +464,7 @@ test('turnActivity labels a routed turn per mode and names what moved the route'
       advice('code', 0.9),
       haiku,
       { ...opus, activity: 'code', reason: 'upgrade' },
-      { answer: 'code', label: 'code', predicted: 'code', switched: 'tier', lateral: null, wouldDiffer: null },
+      { answer: 'code', label: 'code', predicted: 'code', switched: 'tier', lateral: null },
     ],
     [
       'on: an effort change is a switch',
@@ -528,7 +472,7 @@ test('turnActivity labels a routed turn per mode and names what moved the route'
       null,
       sonnet,
       { ...sonnet, effort: 'high', activity: null, reason: 'context-fit' },
-      { answer: null, label: null, predicted: null, switched: 'tier', lateral: null, wouldDiffer: null },
+      { answer: null, label: null, predicted: null, switched: 'tier', lateral: null },
     ],
     [
       'on: a pin is no switch',
@@ -536,65 +480,26 @@ test('turnActivity labels a routed turn per mode and names what moved the route'
       null,
       haiku,
       { ...opus, activity: null, reason: 'pinned', pinned: true },
-      { answer: null, label: null, predicted: null, switched: null, lateral: null, wouldDiffer: null },
+      { answer: null, label: null, predicted: null, switched: null, lateral: null },
     ],
     [
-      'shadow: the accepted label and what on would do',
-      'shadow',
-      advice('code', 0.7),
-      haiku,
-      {
-        ...haiku,
-        activity: null,
-        reason: 'hold',
-        wouldRoute: {
-          ...sonnet,
-          activity: 'code',
-          reason: 'activity-up',
-          lateral: 'taken',
-          difference: { minUsd: 0.01, maxUsd: 0.1 },
-        },
-      },
-      {
-        answer: 'code',
-        label: 'code',
-        predicted: 'code',
-        switched: null,
-        lateral: 'taken',
-        wouldDiffer: true,
-        wouldUsd: { minUsd: 0.01, maxUsd: 0.1 },
-      },
-    ],
-    [
-      'shadow: a weak label is none, the same route does not differ',
-      'shadow',
-      advice('code', 0.5),
-      null,
-      { ...haiku, activity: null, reason: 'hold', wouldRoute: { ...haiku, activity: null, reason: 'hold' } },
-      { answer: null, label: null, predicted: 'code', switched: null, lateral: null, wouldDiffer: false },
-    ],
-    [
-      'shadow: uncertain is predicted but not a label',
-      'shadow',
+      'on: uncertain is predicted but not a label',
+      'on',
       advice('uncertain', 0.9),
       haiku,
-      { ...haiku, activity: null, reason: 'hold', wouldRoute: null },
-      { answer: null, label: null, predicted: 'uncertain', switched: null, lateral: null, wouldDiffer: false },
+      { ...haiku, activity: null, reason: 'hold' },
+      { answer: null, label: null, predicted: 'uncertain', switched: null, lateral: null },
     ],
     [
       'off: nothing',
       'off',
       null,
       haiku,
-      { ...haiku, activity: null, reason: 'hold', wouldRoute: null },
-      { answer: null, label: null, predicted: null, switched: null, lateral: null, wouldDiffer: null },
+      { ...haiku, activity: null, reason: 'hold' },
+      { answer: null, label: null, predicted: null, switched: null, lateral: null },
     ],
   ])
-    assert.deepEqual(
-      turnActivity(config(mode), answer, previous, decision),
-      { mode, wouldUsd: null, ...expected },
-      name,
-    );
+    assert.deepEqual(turnActivity(config(mode), answer, previous, decision), { mode, ...expected }, name);
 });
 
 test('storeSummary counts labelled turns, agreement over activity rows, and the two largest disagreements', () => {
@@ -619,7 +524,6 @@ test('storeSummary counts labelled turns, agreement over activity rows, and the 
       { predicted: 'ops', observed: 'code', n: 3 },
     ],
     lateral: { taken: 4, refused: 2 },
-    shadow: shadowOf(0, 0),
   });
   assert.deepEqual(storeSummary(emptyStore()), {
     labelled: 0,
@@ -627,7 +531,6 @@ test('storeSummary counts labelled turns, agreement over activity rows, and the 
     focus: { matched: 0, total: 0 },
     disagreements: [],
     lateral: { taken: 0, refused: 0 },
-    shadow: shadowOf(0, 0),
   });
 });
 
@@ -692,14 +595,6 @@ test('escalations after a cheaper activity move: a move starts the watch, one es
       'an off turn ends the watch',
       [down, { ...down, mode: 'off', reason: 'same-tier' }, escalation],
       ['moved', null, null],
-    ],
-    [
-      'shadow never counts',
-      [
-        { ...down, mode: 'shadow' },
-        { ...escalation, mode: 'shadow' },
-      ],
-      [null, null],
     ],
   ]) {
     let after = null;

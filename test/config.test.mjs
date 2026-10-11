@@ -149,7 +149,7 @@ for (const [name, userFile, message] of [
     { activities: { code: { high: { effort: 'ultra' } } } },
     /activities\.code\.high\.effort/,
   ],
-  ['an unknown activity mode', { activityRouting: 'auto' }, /activityRouting must be one of off, shadow, on/],
+  ['an unknown activity mode', { activityRouting: 'auto' }, /activityRouting must be one of off, on/],
   ['activityMass above 1', { policy: { activityMass: 1.5 } }, /policy\.activityMass/],
   ['a negative activityMass', { policy: { activityMass: -0.1 } }, /policy\.activityMass/],
   ['fractional text chars', { context: { maxTextChars: 1.5 } }, /context\.maxTextChars/],
@@ -431,7 +431,7 @@ test('the default micro and low routes are Haiku at their own effort whatever th
 test('activity routing defaults to on with Sonnet at high for low engineering work and Haiku for medium ops', () => {
   const config = loadConfig();
   assert.deepEqual(ACTIVITY_VALUES, [...ACTIVITIES, 'uncertain']);
-  assert.deepEqual(ACTIVITY_MODES, ['off', 'shadow', 'on']);
+  assert.deepEqual(ACTIVITY_MODES, ['off', 'on']);
   assert.equal(config.activityRouting, 'on');
   assert.equal(config.policy.activityMass, 0.6);
   const sonnet = { model: 'sonnet', effort: 'high' };
@@ -497,12 +497,11 @@ test('a user override merges per field over the built-in one', () => {
   }
 });
 
-// What 1.6 pane saves and hand edits left in router.json: a mode other than its `shadow` default, cells that differ
+// What 1.6 pane saves and hand edits left in router.json: a mode other than its default, cells that differ
 // from its Sonnet·medium overrides, and removed built-ins written as the tier's base route.
 test('a 1.6 router.json loads unchanged: its mode and cells stay as written, other cells take the new defaults', () => {
   for (const [name, file, mode, cells] of [
     ['no activity keys', {}, 'on', [['low', 'code', { model: 'sonnet', effort: 'high' }]]],
-    ['shadow written by hand', { activityRouting: 'shadow' }, 'shadow', []],
     ['off', { activityRouting: 'off' }, 'off', []],
     [
       'a 1.6 removal of docs at low',
@@ -531,6 +530,27 @@ test('a 1.6 router.json loads unchanged: its mode and cells stay as written, oth
     for (const [tier, activity, route] of cells)
       assert.deepEqual(resolveRoute(config, tier, activity), route, `${name}: ${tier} ${activity}`);
   }
+});
+
+test('a retired shadow mode reads as unset, and other unknown modes still throw', () => {
+  for (const key of ['activityRouting', 'subagentRouting']) {
+    assert.equal(loadConfig({ userFile: { [key]: 'shadow' } })[key], 'on', key);
+    assert.throws(() => loadConfig({ userFile: { [key]: 'auto' } }), new RegExp(`${key} must be one of off, on`), key);
+  }
+  const both = loadConfig({
+    userFile: { activityRouting: 'shadow', subagentRouting: 'shadow', baselineTier: 'medium' },
+  });
+  assert.deepEqual([both.activityRouting, both.subagentRouting, both.baselineTier], ['on', 'on', 'medium']);
+});
+
+test('a pane save drops a retired shadow mode from router.json', () => {
+  const onDisk = { activityRouting: 'shadow', subagentRouting: 'shadow', baselineTier: 'medium' };
+  const loaded = loadConfig({ userFile: onDisk });
+  const draft = editActivity(draftOf(loaded), loaded, 'ops', 'low', 'model', 'sonnet');
+  assert.deepEqual(withActivities(onDisk, draft), {
+    baselineTier: 'medium',
+    activities: { ops: { low: { model: 'sonnet', effort: 'high' } } },
+  });
 });
 
 test('the documented activities example loads in every mode', () => {
@@ -616,13 +636,7 @@ test('withActivities writes only the cells and mode that differ from the default
       null,
       [['medium', 'code', { model: 'sonnet', effort: 'medium' }]],
     ],
-    [
-      'a mode other than the default',
-      {},
-      (d) => ({ ...d, activityRouting: 'shadow' }),
-      { activityRouting: 'shadow' },
-      [],
-    ],
+    ['a mode other than the default', {}, (d) => ({ ...d, activityRouting: 'off' }), { activityRouting: 'off' }, []],
     ['the default mode is no key', { activityRouting: 'off' }, (d) => ({ ...d, activityRouting: 'on' }), {}, []],
   ]) {
     const loaded = loadConfig({ userFile: file });

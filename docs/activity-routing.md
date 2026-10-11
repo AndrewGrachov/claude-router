@@ -46,7 +46,7 @@ A `·` cell uses the base route.
 Why each row:
 
 - **Base route.** The tier ladder, unchanged since 1.4. It runs for every cell without an override, and for every
-  turn when activity routing is `off` or `shadow`.
+  turn when activity routing is `off`.
 - **`code`, `debug`, `plan`, `review` at `low`: Sonnet · high.** Code is where Haiku trails most. Sonnet at `high`
   scores well above Haiku on coding tests. Sonnet at `medium` does not, so it is not used.
 - **`ops` at `medium`: Haiku · high.** Command runs last many requests, so Haiku pays back its cache write. Haiku is
@@ -112,24 +112,25 @@ taken only when it pays back within the payback horizon. A move down a tier weig
 classifier's confidence: a costly write needs a more confident answer, but a confident enough answer can still move. Like the table, it prices Haiku at five times its list rates above 100,000 tokens
 (`models.haiku.longContext` in [Configuration](configuration.md)).
 
-## Turn it off or back to shadow
+## Turn it off
 
-| Mode     | What the router does                                                                       |
-| -------- | ------------------------------------------------------------------------------------------ |
-| `on`     | The default. Asks the activity and runs the override when the cell has one.                |
-| `shadow` | Asks the activity and shows what `on` would run. The base routes run. 1.6's default.       |
-| `off`    | Does not ask the activity: the classifier is asked for the tier only. The base routes run. |
+| Mode  | What the router does                                                                       |
+| ----- | ------------------------------------------------------------------------------------------ |
+| `on`  | The default. Asks the activity and runs the override when the cell has one.                |
+| `off` | Does not ask the activity: the classifier is asked for the tier only. The base routes run. |
+
+A `router.json` that still sets `"shadow"`, a mode removed in 1.10.1, is read as not setting it: the default, `on`, runs, and the next save from the pane drops the value.
 
 Pick one of:
 
-- Run `/router activities shadow` or `/router activities off`. It is saved to `router.json` at once. **Undo** in the
+- Run `/router activities off`. It is saved to `router.json` at once. **Undo** in the
   pane reverts it.
-- Open the pane with `/router`, press `2` for the **Routing** tab, set **Activity routing** at the top of
-  **ACTIVITIES**, and press **Save** (`s`).
+- Open the pane with `/router`, press `2` for the **Routes** tab, set **Activity routing** at the top, and press
+  **Save** (`s`).
 - Write it in `router.json`:
 
   ```json
-  { "activityRouting": "shadow" }
+  { "activityRouting": "off" }
   ```
 
 Routing as a whole has its own on/off pair at the top of the pane. Turning routing off keeps Claude's model for every
@@ -195,27 +196,26 @@ label was right, not the classifier's probabilities.
 
 ## Upgrading from 1.6
 
-1.6 shipped activity routing in `shadow`. 1.7 turns it `on`, with the matrix above.
+1.6 asked the activity but ran the base routes. 1.7 turns activity routing `on`, with the matrix above.
 
-- A `router.json` that sets `activityRouting` keeps it. A file without it now runs `on`. To keep 1.6's behavior, run
-  `/router activities shadow`. Choosing `shadow` in 1.6 removed the key, because `shadow` was the default then. If you
-  chose `shadow` in 1.6, run `/router activities shadow` again after upgrading.
+- A `router.json` with `activityRouting: "off"` keeps it. Any other file now runs `on`. To keep 1.6's routes, run
+  `/router activities off`.
 - A session started on Sonnet 5.5 used to start with routing off, because no tier route used Sonnet. Sonnet now runs
   the `code` cell at `low`, so the session starts with routing on and the router may move it to Haiku or Opus. To
   stay on Sonnet in this session, choose it with `/model` or run `/router off`. To make future Sonnet sessions start
-  with routing off, also run `/router activities shadow`.
+  with routing off, also run `/router activities off`.
 - Overrides you saved stay as written. An override that sets only one field, such as `"effort"`, takes the other from
   1.7's built-in for that cell, or from the base route where 1.7 has none (`explore` and `docs` at `medium`, `docs` at
   `low`). 1.6's overrides in those cells and in `ops` at `medium` were Sonnet · medium, so such a cell can now run
   another model or effort. Write both `model` and `effort` to keep 1.6's route.
 - If you removed a 1.6 built-in override that 1.7 no longer has, such as `docs` at `low`, its cell on the Routes tab
   says "same as the tier’s model: no effect". Press **Use tier model** and **Save** to drop it.
-- 1.6 reads the same keys. A file without `activityRouting` runs `shadow` under 1.6.
+- 1.6 reads the same keys. A file without `activityRouting` runs 1.6's default under 1.6.
 
 ## What the estimates mean
 
 **In the pane.** The band, the Now tab and the Usage tab report Claude's own readings: cost, context, and cache. The
-dollar figures next to them, such as the switch cost, the payback, and the shadow line on the Usage tab, are estimates
+dollar figures next to them, such as the switch cost, and the payback, are estimates
 at the list prices in `router.json`. They are not your bill: a plan does not charge list prices. They are not measured
 savings: the router does not know what another model would have answered, or how many requests it would have needed.
 

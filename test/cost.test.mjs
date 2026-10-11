@@ -91,7 +91,7 @@ test('unknown TTL keeps an optimistic incumbent scenario and a cold candidate up
   const [micro, medium] = ['micro', 'medium'].map((tier) => resolveRoute(SONNET_MEDIUM, tier));
   near(native.switchingTaxUsd(SONNET_MEDIUM, micro, medium, facts, later), 0.2664);
   near(native.downgradeTaxUsd(SONNET_MEDIUM, micro, medium, facts, later, 5), 0.1683);
-  const estimate = native.shadowEconomics(SONNET_MEDIUM, micro, medium, facts, later);
+  const estimate = native.switchEconomics(SONNET_MEDIUM, micro, medium, facts, later);
   near(estimate.nextTurnUsd, 0.2589);
   near(estimate.laterTurnUsd, -0.02265);
   assert.equal(estimate.paybackTurns, 12);

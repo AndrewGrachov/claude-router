@@ -24,7 +24,7 @@ if (!Object.hasOwn(loaded.classifiers, id)) {
   process.exit(2);
 }
 // A profile with activity routing off would not ask the question at all.
-const config = { ...loaded, classifier: id, activityRouting: 'shadow' };
+const config = { ...loaded, classifier: id, activityRouting: 'on' };
 const entry = config.classifiers[id];
 const credentials = await resolveCredentials(entry, (name) => process.env[name.toUpperCase()]?.trim());
 if (credentials.missing) {

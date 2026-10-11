@@ -35,19 +35,6 @@ async function finish(h, agentId, model) {
 
 const stored = (h) => h.preferences.get(`${SUBAGENT_PREFIX}s1`);
 
-test('shadow spawns as Claude Code would and records the decision against the model that ran', async () => {
-  const h = await started({ subagentRouting: 'shadow' });
-  const input = spawnInput();
-  const { answer, sent } = await h.spawn(input);
-  assert.equal(sent, input);
-  assert.deepEqual(answer, { model: 'claude-opus-5-5', agentId: 'a1' });
-  await finish(h, 'a1', 'claude-opus-5-5');
-  const counts = stored(h).routed.shadow.Explore;
-  assert.deepEqual([counts.agents, counts.differs, counts.requests, counts.choices], [1, 1, 1, { haiku: 1 }]);
-  assert.ok(counts.routedUsd < counts.coreUsd);
-  assert.deepEqual(h.view().subagentStore, stored(h));
-});
-
 test('on, the default, spawns a listed type on its model, by full id', async () => {
   const h = await started();
   const { answer, sent } = await h.spawn(spawnInput());
@@ -197,37 +184,8 @@ test('agents spawned at once each get the classifier’s answer', async () => {
   for (const { sent } of await both) assert.equal(sent.model, 'claude-sonnet-5-5');
 });
 
-test('shadow starts the agent before the classifier answers; on waits for the answer', async () => {
-  for (const [mode, spawnsFirst] of [
-    ['shadow', true],
-    ['on', false],
-  ]) {
-    const h = await started({ subagentRouting: mode });
-    let release;
-    const gate = new Promise((resolve) => {
-      release = resolve;
-    });
-    h.http(async () => {
-      await gate;
-      return { ok: true, status: 200, text: JSON.stringify(LOW), headers: {} };
-    });
-    let spawned = false;
-    const spawning = h.spawn(spawnInput({ subagentType: 'general-purpose' }), (sent) => {
-      spawned = true;
-      return { model: sent.model ?? 'claude-opus-5-5', agentId: 'a1' };
-    });
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(spawned, spawnsFirst, mode);
-    release();
-    await spawning;
-    assert.equal(spawned, true);
-    await finish(h, 'a1', mode === 'on' ? 'claude-sonnet-5-5' : 'claude-opus-5-5');
-    assert.deepEqual(stored(h).routed[mode]['general-purpose'].choices, { sonnet: 1 }, mode);
-  }
-});
-
-test('in shadow, an agent that replies and finishes before the classifier answers is counted in full', async () => {
-  const h = await started({ subagentRouting: 'shadow' });
+test('on waits for the classifier before the agent starts', async () => {
+  const h = await started();
   let release;
   const gate = new Promise((resolve) => {
     release = resolve;
@@ -236,18 +194,17 @@ test('in shadow, an agent that replies and finishes before the classifier answer
     await gate;
     return { ok: true, status: 200, text: JSON.stringify(LOW), headers: {} };
   });
-  const spawning = h.spawn(spawnInput({ subagentType: 'general-purpose' }), {
-    model: 'claude-opus-5-5',
-    agentId: 'a1',
+  let spawned = false;
+  const spawning = h.spawn(spawnInput({ subagentType: 'general-purpose' }), (sent) => {
+    spawned = true;
+    return { model: sent.model, agentId: 'a1' };
   });
   await new Promise((resolve) => setImmediate(resolve));
-  await finish(h, 'a1', 'claude-opus-5-5');
-  assert.equal(stored(h), undefined);
+  assert.equal(spawned, false);
   release();
   await spawning;
-  const counts = stored(h).routed.shadow['general-purpose'];
-  assert.deepEqual([counts.agents, counts.requests, counts.pricedRequests, counts.choices], [1, 1, 1, { sonnet: 1 }]);
-  assert.ok(counts.coreUsd > counts.routedUsd);
+  await finish(h, 'a1', 'claude-sonnet-5-5');
+  assert.deepEqual(stored(h).routed.on['general-purpose'].choices, { sonnet: 1 });
 });
 
 test('a model availableModels blocks keeps core’s model', async () => {
@@ -286,37 +243,37 @@ test('a subagent’s steps run as Claude Code sent them', async () => {
 });
 
 test('a spawn of a type its parent just finished one of counts as a respawn', async () => {
-  const h = await started({ subagentRouting: 'shadow' });
-  await h.spawn(spawnInput(), { model: 'claude-opus-5-5', agentId: 'a1' });
-  await finish(h, 'a1', 'claude-opus-5-5');
-  await h.spawn(spawnInput(), { model: 'claude-opus-5-5', agentId: 'a2' });
-  await h.spawn(spawnInput({ parentAgentId: 'a9' }), { model: 'claude-opus-5-5', agentId: 'a3' });
-  await finish(h, 'a2', 'claude-opus-5-5');
-  await finish(h, 'a3', 'claude-opus-5-5');
-  const counts = stored(h).routed.shadow.Explore;
+  const h = await started();
+  await h.spawn(spawnInput(), { model: 'claude-haiku-5-5', agentId: 'a1' });
+  await finish(h, 'a1', 'claude-haiku-5-5');
+  await h.spawn(spawnInput(), { model: 'claude-haiku-5-5', agentId: 'a2' });
+  await h.spawn(spawnInput({ parentAgentId: 'a9' }), { model: 'claude-haiku-5-5', agentId: 'a3' });
+  await finish(h, 'a2', 'claude-haiku-5-5');
+  await finish(h, 'a3', 'claude-haiku-5-5');
+  const counts = stored(h).routed.on.Explore;
   assert.deepEqual([counts.agents, counts.respawns], [3, 1]);
 });
 
 test('an agent still running when the session ends is counted, and Reset stats clears the subagent records', async () => {
-  const h = await started({ subagentRouting: 'shadow' });
+  const h = await started();
   await h.spawn(spawnInput());
-  await drain(h.step({ ...step, agentId: 'a1', model: 'claude-opus-5-5' }));
+  await drain(h.step({ ...step, agentId: 'a1', model: 'claude-haiku-5-5' }));
   await h.event('session.end', { reason: 'clear', sessionId: 's1' });
-  assert.equal(stored(h).routed.shadow.Explore.requests, 1);
+  assert.equal(stored(h).routed.on.Explore.requests, 1);
 
   const r = await started();
   await r.spawn(spawnInput());
-  await finish(r, 'a1', 'claude-opus-5-5');
+  await finish(r, 'a1', 'claude-haiku-5-5');
   await press(r, 'tab-usage');
   await press(r, 'reset-stats');
   assert.equal(stored(r), undefined);
-  assert.deepEqual(r.view().subagentStore.routed, { shadow: {}, on: {} });
+  assert.deepEqual(r.view().subagentStore.routed, { on: {} });
 });
 
 test('the Usage tab shows each routed type and the pass-throughs across sessions', async () => {
-  const h = await started({ subagentRouting: 'shadow' });
+  const h = await started();
   await h.spawn(spawnInput());
-  await finish(h, 'a1', 'claude-opus-5-5');
+  await finish(h, 'a1', 'claude-haiku-5-5');
   await h.spawn(spawnInput({ workflow: { runId: 'wf_1', agentIndex: 1 } }), {
     model: 'claude-opus-5-5',
     agentId: 'w1',
@@ -326,7 +283,7 @@ test('the Usage tab shows each routed type and the pass-throughs across sessions
   const lines = screen(await h.render());
   const at = lines.findIndex((line) => line.startsWith('SUBAGENTS · across sessions'));
   assert.ok(at >= 0, lines.join('\n'));
-  assert.match(lines[at], /subagent routing shadow/);
+  assert.match(lines[at], /subagent routing on/);
   assert.match(
     lines.slice(at).join('\n'),
     /Explore {2}1 agent · 1 moved · 1\.0 req\/agent · 0 respawns · \$\d+\.\d\d → \$\d+\.\d\d/,

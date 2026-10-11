@@ -41,12 +41,6 @@ const MORE = {
   stronger: { 'claude-opus-5-5': 9 },
 };
 const EARLY = { ...SAVES, replies: 3, routedUsd: 0.21, yoursUsd: 0.26, cheaperUsd: -0.06, switchUsd: 0.01 };
-const SHADOW = {
-  byActivity: {},
-  switches: { tier: 0, activity: 0 },
-  agreement: { matched: 0, total: 0 },
-  shadow: { differs: 3, turns: 20, estimated: 3, minUsd: -0.42, maxUsd: -0.11 },
-};
 const OPUS = { nativeModel: 'claude-opus-5-5', nativeEffort: 'xhigh' };
 const HAIKU = { nativeModel: 'claude-haiku-5-5', nativeEffort: 'high' };
 const FOOTER = [
@@ -71,9 +65,6 @@ const view = (props) => ({
   ...props,
 });
 
-// The activity-routing estimate line shows only in shadow, which 1.7 no longer defaults to.
-const SHADOW_CONFIG = { ...DEFAULTS, activityRouting: 'shadow' };
-
 function section(props, { columns = 100, config = DEFAULTS } = {}) {
   const lines = screen(renderPanel(ELEMENTS, config, view(props), null, actions, { columns }));
   const at = lines.findIndex((line) => line.startsWith('ROUTING VS YOUR MODEL'));
@@ -84,7 +75,7 @@ test('the Usage tab opens with routing vs your model, each number on the line th
   for (const [name, props, expected] of [
     [
       'a session that saves',
-      { ...OPUS, savings: SAVES, activityStats: SHADOW },
+      { ...OPUS, savings: SAVES },
       [
         'ROUTING VS YOUR MODEL · Opus 5.5 · xhigh   this session   since Oct 10',
         '  Routed replies                           $6.40          $41.18',
@@ -97,7 +88,6 @@ test('the Usage tab opens with routing vs your model, each number on the line th
         '  routed      █████████████████░░░░░  $6.40',
         '  your model  ██████████████████████  $8.24',
         '  ■ micro 19%  ■ low 41%  ■ medium 27%  ■ high 14% of replies',
-        '  if activity routing were on: est. −$0.42 … −$0.11 this session',
         ...SAVED_FOOTER,
       ],
     ],
@@ -176,7 +166,7 @@ test('the Usage tab opens with routing vs your model, each number on the line th
       ['ROUTING VS YOUR MODEL · Mystery 1.0', '  Mystery 1.0 has no list price in router.json models.'],
     ],
   ])
-    assert.deepEqual(section(props, { config: SHADOW_CONFIG }), expected, name);
+    assert.deepEqual(section(props), expected, name);
 });
 
 test('the Usage tab opens with the answer, once the session has enough routed replies', () => {
@@ -233,7 +223,7 @@ test('a narrow pane keeps every sentence whole and indented', () => {
 test('in a narrow pane every amount starts under its column head', () => {
   for (const columns of [64, 58, 56])
     for (const savings of [SAVES, EARLY]) {
-      const lines = section({ ...OPUS, savings, activityStats: SHADOW }, { columns });
+      const lines = section({ ...OPUS, savings }, { columns });
       const heads = [lines[1].indexOf('this session'), lines[1].indexOf('since')].filter((at) => at >= 0);
       for (const line of lines.slice(2, lines.indexOf('')))
         for (const amount of line.matchAll(/[−+]?\$\d/g))
@@ -242,7 +232,7 @@ test('in a narrow pane every amount starts under its column head', () => {
 });
 
 test('a narrow pane drops the bars before any number, then the saved column', () => {
-  const props = { ...OPUS, savings: SAVES, activityStats: SHADOW };
+  const props = { ...OPUS, savings: SAVES };
   const at64 = section(props, { columns: 64 });
   assert.deepEqual(at64.slice(0, 4), [
     'ROUTING VS YOUR MODEL · Opus 5.5 · xhigh',
@@ -255,12 +245,6 @@ test('a narrow pane drops the bars before any number, then the saved column', ()
   const at56 = section(props, { columns: 56 });
   assert.equal(at56[3], '  Same tokens on your model     $8.24');
   assert.ok(at56.every((line) => !line.includes('since')));
-});
-
-test('the activity estimate shows only in shadow, where on is not yet in the routed figure', () => {
-  const props = { ...OPUS, savings: SAVES, activityStats: SHADOW };
-  for (const mode of ['off', 'on'])
-    assert.ok(!section(props, { config: { ...DEFAULTS, activityRouting: mode } }).some((l) => l.includes('activity')));
 });
 
 test('the two-row band says the session against your model now, one scope, the answer kept when narrow', () => {

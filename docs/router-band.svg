@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 922 509" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 922 444" role="img" aria-labelledby="title desc">
   <title id="title">The Router band above the Claude Code prompt</title>
-  <desc id="desc">Seven band states drawn by the router code: routed to high, two rows with the hover row, a pending pin, a missing classifier key, routing off, an activity move with activity routing on, and an activity label in shadow.</desc>
+  <desc id="desc">Six band states drawn by the router code: routed to high, two rows with the hover row, a pending pin, a missing classifier key, routing off, and an activity move with activity routing on.</desc>
   <style>
     text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size: 13px; }
     .cap { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 12px; fill: #9a988f; }
   </style>
-  <rect width="922" height="509" rx="8" fill="#1c1c1c"/>
+  <rect width="922" height="444" rx="8" fill="#1c1c1c"/>
 <text class="cap" x="20" y="30">Routing on: routed to the high tier on a clear jump</text>
 <rect x="12" y="38" width="897.6" height="29" rx="5" fill="#232323"/>
 <text x="24.0" y="56" fill="#e0708a" xml:space="preserve">▂</text>
@@ -135,22 +135,4 @@
 <text x="531.0" y="419" fill="#d0d0d0" xml:space="preserve"> · cache hit </text>
 <text x="632.4" y="419" fill="#87d787" xml:space="preserve">100%</text>
 <text x="679.2" y="419" fill="#d0d0d0" xml:space="preserve">Router</text>
-<text class="cap" x="20" y="458">Activity routing in shadow: the label is shown, the base route still runs</text>
-<rect x="12" y="466" width="897.6" height="29" rx="5" fill="#232323"/>
-<text x="24.0" y="484" fill="#5f9fe0" xml:space="preserve">▂</text>
-<text x="31.8" y="484" fill="#5f9fe0" xml:space="preserve">▄</text>
-<text x="39.6" y="484" fill="#7c7c7c" xml:space="preserve">▆</text>
-<text x="47.4" y="484" fill="#7c7c7c" xml:space="preserve">█</text>
-<rect x="55.2" y="470" width="39.0" height="18" rx="4" fill="#5f9fe0"/>
-<text x="55.2" y="484" fill="#0d1016" font-weight="700" xml:space="preserve"> low </text>
-<text x="102.0" y="484" fill="#7c7c7c" xml:space="preserve">coding (shadow) → </text>
-<text x="242.4" y="484" fill="#d0d0d0" xml:space="preserve">Haiku 5.5 · high</text>
-<text x="367.2" y="484" fill="#7c7c7c" xml:space="preserve">  ·  </text>
-<text x="406.2" y="484" fill="#7c7c7c" xml:space="preserve">= fits</text>
-<text x="453.0" y="484" fill="#7c7c7c" xml:space="preserve">  ·  </text>
-<text x="492.0" y="484" fill="#d0d0d0" xml:space="preserve">ctx </text>
-<text x="523.2" y="484" fill="#87d787" xml:space="preserve">40%</text>
-<text x="546.6" y="484" fill="#d0d0d0" xml:space="preserve"> · cache hit </text>
-<text x="648.0" y="484" fill="#87d787" xml:space="preserve">100%</text>
-<text x="694.8" y="484" fill="#d0d0d0" xml:space="preserve">Router</text>
 </svg>

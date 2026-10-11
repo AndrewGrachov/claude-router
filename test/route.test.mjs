@@ -382,7 +382,6 @@ test('cellForModel searches base routes first, and activity overrides only in on
   const custom = { userFile: { activities: { review: { high: { model: 'sonnet', effort: 'max' } } } } };
   for (const [mode, id, file, expected] of [
     ['off', 'claude-sonnet-5-5', {}, null],
-    ['shadow', 'claude-sonnet-5-5', {}, null],
     ['on', 'claude-sonnet-5-5', {}, { tier: 'low', activity: 'code' }],
     ['on', model, {}, { tier: 'low', activity: null }],
     ['on', 'claude-opus-5-5', {}, { tier: 'medium', activity: null }],

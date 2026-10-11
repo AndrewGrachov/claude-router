@@ -408,28 +408,6 @@ test('off ignores the activity answer and decides as recorded', () => {
   }
 });
 
-test('shadow applies the recorded decision and reports exactly what on applies', () => {
-  const route = ({ decision }) => {
-    const { activity = null, tier, model, effort, reason } = decision;
-    return { activity, tier, model, effort, reason };
-  };
-  for (const activity of LABELS) {
-    const shadow = normalize(scenarios({ configs: inMode('shadow'), activity }));
-    for (const [name, expected] of Object.entries(golden))
-      assert.deepEqual(shadow[name], expected, `${activity.choice}: ${name}`);
-    const would = scenarios({
-      configs: inMode('shadow'),
-      activity,
-      view: (loop) => route({ decision: loop.decision.wouldRoute }),
-    });
-    const on = scenarios({ configs: inMode('on'), activity, view: route });
-    // A tool continuation may refit the applied route; wouldRoute describes the turn's first request. A fresh loop is
-    // no decision.
-    for (const name of Object.keys(on).filter((n) => !n.includes(' continue ') && !n.includes(' empty-loop ')))
-      assert.deepEqual(would[name], on[name], `${activity.choice}: ${name}`);
-  }
-});
-
 test('on with overrides equal to the base routes decides as recorded: equal routes never switch', () => {
   const flat = (c) => ({ activities: Object.fromEntries(ACTIVITIES.map((a) => [a, { ...c.routes }])) });
   for (const activity of LABELS) {

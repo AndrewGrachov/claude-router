@@ -8,7 +8,6 @@ import { renderPanel, routeDraftOf } from '../lib/panel.mjs';
 
 const OUT = fileURLToPath(new URL('../docs', import.meta.url));
 const config = { ...loadConfig(), nativePath: '~/.claude/router.json' };
-const shadow = { ...config, activityRouting: 'shadow' };
 const element = (type) => (props) => ({ type, props });
 const elements = { Box: element('Box'), Text: element('Text'), Button: element('Button'), Select: element('Select') };
 const noop = () => {};
@@ -252,26 +251,11 @@ const states = [
     },
     false,
   ],
-  [
-    'Activity routing in shadow: the label is shown, the base route still runs',
-    {
-      ...base,
-      tier: 'low',
-      selectedModel: 'claude-haiku-5-5',
-      actualModel: 'claude-haiku-5-5',
-      effort: 'high',
-      reason: 'same-tier',
-      estimate: null,
-      wouldRoute: { activity: 'code', tier: 'low', model: 'claude-sonnet-5-5', effort: 'high', reason: 'activity-up' },
-    },
-    false,
-    shadow,
-  ],
 ];
 let y = 30;
 const parts = [];
-for (const [caption, view, hover, bandConfig = config] of states) {
-  const tree = renderBand(elements, bandConfig, view, usage, { columns: COLUMNS }, actions);
+for (const [caption, view, hover] of states) {
+  const tree = renderBand(elements, config, view, usage, { columns: COLUMNS }, actions);
   const lines = lay(tree, { hover });
   parts.push(`<text class="cap" x="20" y="${y}">${esc(caption)}</text>`);
   parts.push(
@@ -284,7 +268,7 @@ writeFileSync(
   `${OUT}/router-band.svg`,
   svg({
     title: 'The Router band above the Claude Code prompt',
-    desc: 'Seven band states drawn by the router code: routed to high, two rows with the hover row, a pending pin, a missing classifier key, routing off, an activity move with activity routing on, and an activity label in shadow.',
+    desc: 'Six band states drawn by the router code: routed to high, two rows with the hover row, a pending pin, a missing classifier key, routing off, and an activity move with activity routing on.',
     body: parts.join('\n'),
     w: Math.ceil(COLUMNS * CW + 48),
     h: y - 14,
@@ -297,7 +281,6 @@ const activityStore = {
   confusion: { code: { code: 40, read: 4 }, ops: { ops: 18, read: 3, code: 1 }, explore: { read: 12, talk: 5 } },
   runs: {},
   lateral: { taken: 9, refused: 4 },
-  shadow: { differs: 0, turns: 0, estimated: 0, minUsd: 0, maxUsd: 0 },
 };
 function pane(view, title, desc, file, paneConfig = config) {
   const tree = renderPanel(elements, paneConfig, view, usage, actions, { modelOptions: Object.keys(config.models) });
@@ -388,7 +371,6 @@ pane(
       switches: { tier: 5, activity: 3 },
       lateral: { taken: 3, refused: 1 },
       agreement: { matched: 21, total: 24 },
-      shadow: { differs: 0, turns: 0, estimated: 0, minUsd: 0, maxUsd: 0 },
     },
     activityStore,
     activityMetrics: {

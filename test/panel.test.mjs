@@ -180,19 +180,12 @@ const recording = () => {
 const sonnetLow = { tier: 'low', selectedModel: 'claude-sonnet-5-5', effort: 'high', activity: 'code' };
 const haikuLow = { tier: 'low', selectedModel: 'claude-haiku-5-5', effort: 'high', activity: 'code' };
 const reading = { activityChoice: 'code', activityProbabilities: { code: 0.81, ops: 0.09, explore: 0.06, plan: 0 } };
-const would = (activity, model, effort) => ({ wouldRoute: { activity, tier: 'low', model, effort, reason: 'x' } });
 
-test('the Now tab names the activity as a verb, marks an override, and in shadow says what on would run', () => {
-  for (const [mode, props, first, shadow] of [
-    ['on', sonnetLow, 'Next turn  ▌low  Sonnet 5.5 · high   override · low runs Haiku 5.5 · high', null],
-    ['on', { ...haikuLow, activity: 'ops' }, 'Next turn  ▌low  Haiku 5.5 · high', null],
-    [
-      'shadow',
-      { ...haikuLow, ...would('code', 'claude-sonnet-5-5', 'high') },
-      'Next turn  ▌low  Haiku 5.5 · high',
-      'Shadow     low + code would use Sonnet 5.5 · high (shadow; using Haiku 5.5 · high)',
-    ],
-    ['off', haikuLow, 'Next turn  ▌low  Haiku 5.5 · high', null],
+test('the Now tab names the activity as a verb and marks an override', () => {
+  for (const [mode, props, first] of [
+    ['on', sonnetLow, 'Next turn  ▌low  Sonnet 5.5 · high   override · low runs Haiku 5.5 · high'],
+    ['on', { ...haikuLow, activity: 'ops' }, 'Next turn  ▌low  Haiku 5.5 · high'],
+    ['off', haikuLow, 'Next turn  ▌low  Haiku 5.5 · high'],
   ]) {
     const config = { ...DEFAULTS, activityRouting: mode };
     const lines = screen(renderPanel(ELEMENTS, config, view({ ...props, ...reading }), null, actions));
@@ -203,7 +196,6 @@ test('the Now tab names the activity as a verb, marks an override, and in shadow
       mode === 'off' ? 'Why        ready' : 'Activity   coding 81%   running 9% · exploring 6%   applies at 60%+',
       name,
     );
-    assert.equal(lines.find((line) => line.startsWith('Shadow')) ?? null, shadow, name);
   }
   const why = screen(renderPanel(ELEMENTS, DEFAULTS, view({ ...sonnetLow, reason: 'activity-up' }), null, actions));
   assert.ok(why.includes('Why        coding at low runs on Sonnet 5.5 · high'));
@@ -295,11 +287,6 @@ test('the Routes tab is one grid: the tiers’ own models on top, built-in overr
 test('the activity mode leads the Routes tab, and a line says when the overrides do not run', () => {
   for (const [mode, hint, state] of [
     ['on', 'an activity can change its tier’s model', null],
-    [
-      'shadow',
-      'asked and shown; every turn still runs its tier’s model',
-      'Activity overrides not in use: activity routing is shadow',
-    ],
     ['off', 'not asked; every turn runs its tier’s model', 'Activity overrides not in use: activity routing is off'],
   ]) {
     const tree = routesTab({ ...DEFAULTS, activityRouting: mode });
@@ -320,9 +307,8 @@ test('the activity mode leads the Routes tab, and a line says when the overrides
   }
   // A draft mode runs nothing until Save: the line follows the saved mode and says what Save changes.
   for (const [saved, drafted, state] of [
-    ['on', 'shadow', 'Activity overrides in use · not in use after Save'],
-    ['shadow', 'on', 'Activity overrides not in use: activity routing is shadow · in use after Save'],
-    ['shadow', 'off', 'Activity overrides not in use: activity routing is shadow'],
+    ['on', 'off', 'Activity overrides in use · not in use after Save'],
+    ['off', 'on', 'Activity overrides not in use: activity routing is off · in use after Save'],
   ]) {
     const config = { ...DEFAULTS, activityRouting: saved };
     const lines = screen(routesTab(config, { ...routeDraftOf(config, {}), activityRouting: drafted }));
@@ -416,19 +402,19 @@ test('a cell on its tier’s model that equals its built-in default does not say
 });
 
 test('the one-more-cache warning counts the overrides in every activity mode', () => {
-  // Sonnet runs one tier and four built-in overrides: no cell is alone on it, in shadow as in on.
+  // Sonnet runs one tier and four built-in overrides: no cell is alone on it.
   const sonnetTier = (mode) => ({
     ...DEFAULTS,
     activityRouting: mode,
     routes: { ...DEFAULTS.routes, medium: { model: 'sonnet', effort: 'xhigh' } },
   });
-  for (const mode of ['on', 'shadow'])
+  for (const mode of ['on', 'off'])
     assert.ok(
       !screen(routesTab(sonnetTier(mode), null, { routeCell: 'code.low' })).some((l) => l.includes('one more cache')),
       mode,
     );
-  // Where efforts cache apart, Haiku at max for one cell is a new cache, in shadow as in on.
-  for (const mode of ['on', 'shadow']) {
+  // Where efforts cache apart, Haiku at max for one cell is a new cache.
+  for (const mode of ['on', 'off']) {
     const config = { ...DEFAULTS, activityRouting: mode, effortSplitsCache: true };
     const draft = editActivity(routeDraftOf(config, {}), config, 'ops', 'low', 'effort', 'max');
     assert.ok(
@@ -444,7 +430,7 @@ test('the Routes controls call the pane actions with the cell they edit', () => 
   const { calls, actions: recorded } = recording();
   const found = (key, routeCell) =>
     controls(routesTab(DEFAULTS, null, { routeCell }, recorded)).find((c) => c.key === key);
-  found('activity-mode').onSelect('shadow');
+  found('activity-mode').onSelect('off');
   found('cell-code-high').onPress();
   found('cell-tier-low').onPress();
   found('activity-code-low-model', 'code.low').onSelect('opus');
@@ -458,7 +444,7 @@ test('the Routes controls call the pane actions with the cell they edit', () => 
     .find((c) => c.key === 'activity-default-code-low')
     .onPress();
   assert.deepEqual(calls, [
-    ['activityMode', 'shadow'],
+    ['activityMode', 'off'],
     ['selectCell', 'code.high'],
     ['selectCell', 'tier.low'],
     ['activityModel', 'code', 'low', 'opus'],
@@ -478,7 +464,7 @@ test('the draft lists activity edits and the mode in the router.json diff on Rou
   let draft = routeDraftOf(config, {});
   draft = editActivity(draft, config, 'code', 'high', 'effort', 'max');
   draft = editActivity(draft, config, 'review', 'low', 'remove');
-  draft = { ...draft, activityRouting: 'shadow' };
+  draft = { ...draft, activityRouting: 'off' };
   const changes = routingChanges(config, view({ routeDraft: draft }));
   assert.deepEqual(changes.cells, [
     ['code', 'high'],
@@ -497,7 +483,7 @@ test('the draft lists activity edits and the mode in the router.json diff on Rou
         '- activities.review.low          Sonnet 5.5 · high',
         '+ activities.review.low          no override',
         '- activityRouting                on',
-        '+ activityRouting                shadow',
+        '+ activityRouting                off',
         '● 3 unsaved routing changes  [ Save ] [ Discard ]',
       ],
       tab,
@@ -579,14 +565,12 @@ const STATS = {
   },
   switches: { tier: 4, activity: 5 },
   agreement: { matched: 19, total: 22 },
-  shadow: { differs: 5, turns: 20, estimated: 3, minUsd: -0.3, maxUsd: -0.12 },
 };
 const STORE = {
   version: 1,
   confusion: { code: { code: 10, read: 3 }, ops: { ops: 4, code: 1 }, debug: { code: 2 }, uncertain: { talk: 2 } },
   runs: {},
   lateral: { taken: 4, refused: 2 },
-  shadow: { differs: 6, turns: 18, estimated: 6, minUsd: -0.42, maxUsd: 0.18 },
 };
 const METRICS = {
   version: 1,
@@ -596,7 +580,7 @@ const METRICS = {
 const HEAD = `${' '.repeat(26)}turns  requests  share  est. cost`;
 const SESSION_LINES = [
   'BY ACTIVITY · this session',
-  '   activity routing shadow',
+  '   activity routing on',
   `${HEAD}   mostly on`,
   '  ',
   'coding',
@@ -613,10 +597,7 @@ const SESSION_LINES = [
   'Switches   9 · 4 by tier · 5 by activity',
   'Agreement  classifier vs tools: 19 of 22 turns (86%)',
 ];
-const OFF_LINES = [
-  'BY ACTIVITY · activity routing off',
-  '  Not asked. Set activity routing to shadow or on in the Routes tab.',
-];
+const OFF_LINES = ['BY ACTIVITY · activity routing off', '  Not asked. Set activity routing to on in the Routes tab.'];
 const ACROSS = 'ACROSS SESSIONS · since the last reset';
 const ACROSS_LINES = [
   ACROSS,
@@ -626,7 +607,6 @@ const ACROSS_LINES = [
   'Mismatch   code → read 3 · ops → code 1',
   'Activity moves  4 taken · 2 refused',
   'Escalations  after a cheaper activity move: 1 in 12 moves',
-  'Shadow     on would route 6 of 18 turns differently · est. −$0.420 … +$0.180 at list prices',
 ];
 const usageLines = (mode, props, paneActions = actions, options = {}) =>
   texts(
@@ -645,41 +625,16 @@ test('the Usage tab shows this session by activity in each mode, and the counts 
   for (const [name, mode, activityStats, expected] of [
     ['off, nothing recorded', 'off', null, OFF_LINES],
     [
-      'shadow, nothing yet',
-      'shadow',
+      'on, nothing yet',
+      'on',
       null,
-      ['BY ACTIVITY · this session', '   activity routing shadow', '  no activity readings yet'],
+      ['BY ACTIVITY · this session', '   activity routing on', '  no activity readings yet'],
     ],
-    [
-      'shadow, with data and a partial estimate',
-      'shadow',
-      STATS,
-      [
-        ...SESSION_LINES,
-        'Shadow     on would route 5 of 20 turns differently · est. −$0.300 … −$0.120 for 3 at list prices',
-      ],
-    ],
-    [
-      'shadow after on: refused moves from on still show',
-      'shadow',
-      { ...STATS, lateral: { taken: 5, refused: 2 } },
-      [
-        ...SESSION_LINES.slice(0, -2),
-        'Switches   9 · 4 by tier · 5 by activity · 2 refused',
-        SESSION_LINES.at(-1),
-        'Shadow     on would route 5 of 20 turns differently · est. −$0.300 … −$0.120 for 3 at list prices',
-      ],
-    ],
-    [
-      'shadow, no differing turn had an estimate',
-      'shadow',
-      { ...STATS, shadow: { differs: 5, turns: 20, estimated: 0, minUsd: 0, maxUsd: 0 } },
-      [...SESSION_LINES, 'Shadow     on would route 5 of 20 turns differently'],
-    ],
+    ['on, with data', 'on', STATS, SESSION_LINES],
     [
       'on, with refused activity moves',
       'on',
-      { ...ops, lateral: { taken: 5, refused: 2 }, shadow: { differs: 0, turns: 0 } },
+      { ...ops, lateral: { taken: 5, refused: 2 } },
       [
         'BY ACTIVITY · this session',
         '   activity routing on',
@@ -783,7 +738,6 @@ test('the Classifier tab shows the counts across sessions when there are any', (
         ...STORE,
         confusion: { debug: { code: 2, talk: 1 } },
         lateral: { taken: 0, refused: 0 },
-        shadow: { differs: 0, turns: 0 },
       },
       [
         ACROSS,
@@ -793,11 +747,7 @@ test('the Classifier tab shows the counts across sessions when there are any', (
         'Escalations  after a cheaper activity move: 1 in 12 moves',
       ],
     ],
-    [
-      'a 1.6.0 store',
-      { ...STORE, shadow: { differs: 6, turns: 18 } },
-      [...ACROSS_LINES.slice(0, -1), 'Shadow     on would route 6 of 18 turns differently'],
-    ],
+    ['a store saved with the retired shadow readout', { ...STORE, shadow: { differs: 6, turns: 18 } }, ACROSS_LINES],
   ]) {
     const lines = classifierLines({ activityStore, activityMetrics: METRICS });
     const at = lines.indexOf(ACROSS);

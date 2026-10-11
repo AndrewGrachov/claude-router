@@ -65,11 +65,9 @@ test('a classifier switch clears its activity readings with its tier readings', 
     adviceChoice: 'low',
     activityChoice: 'code',
     activityProbabilities: { code: 0.8 },
-    wouldRoute: { activity: 'code', tier: 'low', model: 'claude-sonnet-5-5', effort: 'medium', reason: 'x' },
   };
   const cleared = { ...view, ...CLEARED_READINGS };
-  for (const key of ['adviceChoice', 'activityChoice', 'activityProbabilities', 'wouldRoute'])
-    assert.equal(cleared[key], null, key);
+  for (const key of ['adviceChoice', 'activityChoice', 'activityProbabilities']) assert.equal(cleared[key], null, key);
 });
 
 test('continuationView carries the activity of the route only in on', () => {
@@ -83,7 +81,6 @@ test('continuationView carries the activity of the route only in on', () => {
   const context = { tokens: 1000, known: true };
   for (const [mode, expected] of [
     ['on', null],
-    ['shadow', undefined],
     ['off', undefined],
   ])
     assert.equal(continuationView({ activityRouting: mode }, decision, context).activity, expected, mode);

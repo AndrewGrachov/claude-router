@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- `shadow` mode, from both `activityRouting` and `subagentRouting`. Each now takes `off` or `on`. A `router.json` that still sets `"shadow"` is read as not setting the key, so the default, `on`, runs; the next save from the pane drops it. To keep the base routes, set `off`. `/router activities` takes `off` or `on`. Gone with it: the Shadow line on the Now tab, the `(shadow)` label on the band, the "if activity routing were on" estimate and the Shadow counts on the Usage and Classifier tabs, and the shadow section of SUBAGENTS.
+- Counts kept across sessions drop their shadow figures and keep the rest. After running this version, 1.10.0 or earlier resets the activity counts kept across sessions.
+
 ## 1.10.0 (2026-10-10)
 
 ### Changed

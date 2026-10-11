@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { acceptActivity, compareRoutes } from '../lib/activity.mjs';
-import { turnActivity } from '../lib/activity-stats.mjs';
 import { loadConfig, resolveRoute } from '../lib/config.mjs';
 import { routeCacheKey } from '../lib/cost.mjs';
 import { initialState } from '../lib/policy.mjs';
-import { chooseRoute, emptyLoop, resetHistory } from '../lib/route.mjs';
+import { chooseRoute, emptyLoop } from '../lib/route.mjs';
 import { advice, T0 } from './helpers.mjs';
 
 // The policy cases run on a fixed matrix, the 1.6 overrides, so a change of the shipped defaults does not move them.
@@ -475,59 +474,20 @@ test('the loop keeps the applied activity; a pin keeps the automatic one', () =>
   }
 });
 
-test('off routes without the activity, shadow applies the same and reports what on would do, on applies it', () => {
+test('off routes without the activity, on applies it', () => {
   const routeOf = (d) => [d.tier, d.activity, d.reason, d.model, d.effort];
-  for (const [mode, applied, wouldRoute] of [
-    ['off', ['low', null, 'same-tier', HAIKU, 'high'], null],
-    [
-      'shadow',
-      ['low', null, 'same-tier', HAIKU, 'high'],
-      {
-        activity: 'code',
-        tier: 'low',
-        model: SONNET,
-        effort: 'medium',
-        reason: 'activity-up',
-        lateral: 'taken',
-        // Cold Sonnet read (min) or written at 1h (max), against warm Haiku, plus Sonnet's dearer output.
-        difference: {
-          minUsd: (0.2 * 21_500 - 0.01 * 21_500 + 9.5 * 1_500) / 1e6,
-          maxUsd: (2 * 2 * 21_500 - 0.01 * 21_500 + 9.5 * 1_500) / 1e6,
-        },
-      },
-    ],
-    ['on', ['low', 'code', 'activity-up', SONNET, 'medium'], null],
+  for (const [mode, applied] of [
+    ['off', ['low', null, 'same-tier', HAIKU, 'high']],
+    ['on', ['low', 'code', 'activity-up', SONNET, 'medium']],
   ]) {
     const config = fixed({ activityRouting: mode });
     const loop = turn({ config, label: labelOf('code') });
     assert.deepEqual(routeOf(loop.decision), applied, mode);
-    const { difference, ...route } = loop.decision.wouldRoute ?? {};
-    const { difference: expected, ...expectedRoute } = wouldRoute ?? {};
-    assert.deepEqual(route, expectedRoute, mode);
-    for (const key of ['minUsd', 'maxUsd'])
-      assert.ok(Math.abs((difference?.[key] ?? 0) - (expected?.[key] ?? 0)) < 1e-12, `${mode} ${key}`);
     assert.equal(loop.lastActivity, applied[1], mode);
   }
 });
 
-test('the would-route is priced only when it differs from the applied route and a request was measured', () => {
-  const config = fixed({ activityRouting: 'shadow' });
-  const priced = (setup, change = (x) => x) => {
-    const { loop, input } = turnInput({ config, ...setup });
-    const { loop: l, input: i } = change({ loop, input });
-    return chooseRoute(config, l, i).decision.wouldRoute.difference;
-  };
-  assert.ok(priced({ label: labelOf('code') }).minUsd > 0, 'Sonnet for code costs more than Haiku');
-  for (const [name, setup, change] of [
-    ['the same route', { label: labelOf('ops') }],
-    ['no activity', {}],
-    ['context not known', { label: labelOf('code') }, (x) => ({ ...x, input: { ...x.input, contextKnown: false } })],
-    ['no measured request', { label: labelOf('code') }, (x) => ({ ...x, loop: { ...x.loop, lastRequest: null } })],
-  ])
-    assert.equal(priced(setup, change), null, name);
-});
-
-test('off and the applied shadow decision ignore an activity left in the loop by on', () => {
+test('off ignores an activity left in the loop by on', () => {
   const routeOf = ({ decision: d, lastRoute, lastActivity }) => [
     d.tier,
     d.activity,
@@ -537,7 +497,7 @@ test('off and the applied shadow decision ignore an activity left in the loop by
     lastRoute,
     lastActivity,
   ];
-  for (const mode of ['off', 'shadow'])
+  for (const mode of ['off'])
     for (const [name, setup] of [
       ['during a hold', { state: holding }],
       ['on a same-tier answer', {}],
@@ -555,50 +515,4 @@ test('off and the applied shadow decision ignore an activity left in the loop by
       assert.deepEqual(routeOf(left), routeOf(clean), `${mode} ${name}`);
       assert.deepEqual(routeOf(left).slice(0, 5), ['low', null, routeOf(clean)[2], HAIKU, 'high'], `${mode} ${name}`);
     }
-});
-
-test('shadow follows what on would run from turn to turn, not from the applied route each turn', () => {
-  const config = fixed({ activityRouting: 'shadow' });
-  const { loop: start, input } = turnInput({ config });
-  let loop = start;
-  const seen = [];
-  for (const p of [0.95, 0.95, 0.95, 0.95, 0.95, 0.65]) {
-    const label = labelOf('code', p);
-    const turnInputs = { ...input, advice: { ...input.advice, activity: label } };
-    const previous = loop.decision;
-    loop = chooseRoute(
-      config,
-      { ...loop, decision: null },
-      { ...turnInputs, facts: { ...input.facts, lastRoute: loop.lastRoute } },
-    );
-    const stats = turnActivity(config, turnInputs.advice, previous, loop.decision);
-    seen.push([
-      loop.decision.model,
-      loop.decision.wouldRoute.model,
-      loop.decision.wouldRoute.reason,
-      stats.lateral,
-      stats.wouldDiffer,
-    ]);
-  }
-  assert.deepEqual(seen, [
-    [HAIKU, SONNET, 'activity-up', 'taken', true],
-    ...Array(4).fill([HAIKU, SONNET, 'same-tier', null, true]),
-    [HAIKU, SONNET, 'same-tier', null, true],
-  ]);
-  assert.deepEqual([loop.would.lastRoute, loop.would.lastActivity], ['low', 'code']);
-});
-
-test('only shadow keeps the would-route cell, and a history reset clears its votes and hold', () => {
-  for (const mode of ['off', 'shadow', 'on']) {
-    const config = fixed({ activityRouting: mode });
-    const loop = turn({ config, label: labelOf('code') });
-    assert.equal(loop.would === null, mode !== 'shadow', mode);
-  }
-  const config = fixed({ activityRouting: 'shadow' });
-  const loop = turn({ config, label: labelOf('code'), state: holding, choice: 'medium' });
-  const reset = resetHistory(loop);
-  assert.deepEqual(
-    [reset.would.state.votes, reset.would.state.holdUntilTurn, reset.would.state.escalatedSignature],
-    [[], 0, null],
-  );
 });

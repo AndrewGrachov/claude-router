@@ -63,13 +63,14 @@ Prices are configured list-price inputs for estimates. They are not a subscripti
 
 The classifier also names the activity of a turn: what the turn produces. `activityRouting` decides what the router does with it. [Activity routing](activity-routing.md) explains the defaults for end users.
 
-| `activityRouting` | Behavior                                                                                              |
-| ----------------- | ----------------------------------------------------------------------------------------------------- |
-| `off`             | Does not ask the activity: the classifier is asked for the tier only. The base routes run.            |
-| `shadow`          | Asks, shows the activity, records stats, and computes what `on` would run. The base routes still run. |
-| `on`              | The default since 1.7. Applies the `activities` overrides below.                                      |
+| `activityRouting` | Behavior                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| `off`             | Does not ask the activity: the classifier is asked for the tier only. The base routes run. |
+| `on`              | The default since 1.7. Applies the `activities` overrides below.                           |
 
-The seven activities are `code`, `debug`, `explore`, `plan`, `review`, `ops`, and `docs`. The classifier may also answer `uncertain`. In `on`, an activity applies only when its probability is at least `policy.activityMass`. Below that, or on `uncertain`, a new task goes back to its base route if the move passes the cache checks; a continuation of the running task keeps its activity, or moves to the classifier's activity when that route is stronger. When the classifier gives no usable activity answer, the running activity stays and the tier answer still applies. When it gives no answer at all, the running route stays. In `off` and `shadow`, the base route runs.
+A `router.json` that still sets `"shadow"`, a mode removed in 1.10.1, is read as not setting it: the default, `on`, runs, and the next save from the pane drops the value.
+
+The seven activities are `code`, `debug`, `explore`, `plan`, `review`, `ops`, and `docs`. The classifier may also answer `uncertain`. In `on`, an activity applies only when its probability is at least `policy.activityMass`. Below that, or on `uncertain`, a new task goes back to its base route if the move passes the cache checks; a continuation of the running task keeps its activity, or moves to the classifier's activity when that route is stronger. When the classifier gives no usable activity answer, the running activity stays and the tier answer still applies. When it gives no answer at all, the running route stays. In `off`, the base route runs.
 
 `activities` maps an activity to a tier to a route override. An override may set `model`, `effort`, or both. A field it leaves out comes from the built-in override for that cell, or from the tier's own route, the **base route**, where there is none:
 
@@ -116,11 +117,11 @@ An override for a cell with no built-in names both fields, or inherits the missi
 
 `policy.activityMass` (default `0.6`) is the lowest probability at which an activity applies. The Policy tab sets it under **Activities**, from 50% to 80%. It has not been tuned on any classifier, and the probe results do not record probabilities, so there is no data to tune it on yet.
 
-Switch the mode with `/router activities off|shadow|on`, or with the **Activity routing** selector at the top of the Routes tab. The command writes `router.json` at once; the selector joins the routing draft and writes on **Save**. Choosing `on`, the default, removes the key from the file.
+Switch the mode with `/router activities off|on`, or with the **Activity routing** selector at the top of the Routes tab. The command writes `router.json` at once; the selector joins the routing draft and writes on **Save**. Choosing `on`, the default, removes the key from the file.
 
-**Upgrade from 1.6.** 1.6 defaulted to `shadow` with Sonnet at `medium` in every override. A file without `activityRouting` now runs `on`; a file that sets it keeps its mode. Choosing `shadow` in 1.6 removed the key, because `shadow` was the default then: if you chose `shadow` in 1.6, run `/router activities shadow` again after upgrading. A session started on Sonnet 5.5 now starts with routing on, because Sonnet runs the `code` cell at `low`; to stay on Sonnet in that session, choose it with `/model` or run `/router off`, and run `/router activities shadow` to make future Sonnet sessions start with routing off. Cells you saved stay as written. A cell that sets one field takes the other from 1.7's built-in for that cell, or from the base route where 1.7 has none (`explore` and `docs` at `medium`, `docs` at `low`). 1.6's overrides in those cells and in `ops` at `medium` were Sonnet · medium, so such a cell can now run another model or effort; write both fields to keep 1.6's route. A 1.6 removal of a built-in that 1.7 no longer has, such as `docs` at `low`, stays in the file as the tier's route; its cell on the Routes tab says "same as the tier’s model: no effect", and **Use tier model** drops it.
+**Upgrade from 1.6.** 1.6 asked the activity but ran the base routes, with Sonnet at `medium` in every override. A file with `"activityRouting": "off"` keeps it; any other file now runs `on`. Run `/router activities off` after upgrading to keep 1.6's routes. A session started on Sonnet 5.5 now starts with routing on, because Sonnet runs the `code` cell at `low`; to stay on Sonnet in that session, choose it with `/model` or run `/router off`, and run `/router activities off` to make future Sonnet sessions start with routing off. Cells you saved stay as written. A cell that sets one field takes the other from 1.7's built-in for that cell, or from the base route where 1.7 has none (`explore` and `docs` at `medium`, `docs` at `low`). 1.6's overrides in those cells and in `ops` at `medium` were Sonnet · medium, so such a cell can now run another model or effort; write both fields to keep 1.6's route. A 1.6 removal of a built-in that 1.7 no longer has, such as `docs` at `low`, stays in the file as the tier's route; its cell on the Routes tab says "same as the tier’s model: no effect", and **Use tier model** drops it.
 
-**Rollback.** To go back to 1.6 behavior without downgrading, set `"activityRouting": "shadow"`, or `off`. Router 1.6 reads the same keys; under 1.6 a file without `activityRouting` runs `shadow` with 1.6's overrides. Router 1.5 rejects unknown keys and makes routing unavailable. Before you install 1.5 again, remove `activities`, `activityRouting`, and `policy.activityMass` from `router.json`. The pane writes them when you set the mode to `off` or `shadow`, change the activity threshold, or edit or remove an override.
+**Rollback.** To go back to 1.6 behavior without downgrading, set `"activityRouting": "off"`. Router 1.6 reads the same keys; under 1.6 a file without `activityRouting` runs 1.6's default. Router 1.10.0 and earlier reset the activity stats store that this version writes without a `shadow` key. Router 1.5 rejects unknown keys and makes routing unavailable. Before you install 1.5 again, remove `activities`, `activityRouting`, and `policy.activityMass` from `router.json`. The pane writes them when you set the mode to `off`, change the activity threshold, or edit or remove an override.
 
 ## Classifiers
 
@@ -175,11 +176,12 @@ To check a classifier outside Claude Code, run `node scripts/probe-classifier.mj
 
 `subagentRouting` gives each subagent one model when it starts, as the router gives each main turn one. It never changes the model between a subagent's steps: that would rewrite its context cold. With `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, agents that name no model already run on Sonnet. The router chooses per task instead: Haiku for exploration, Opus only for clearly hard work, Sonnet for the rest. It also routes the built-in Explore and Plan agents, which ignore that variable.
 
-| `subagentRouting` | Behavior                                                                                            |
-| ----------------- | --------------------------------------------------------------------------------------------------- |
-| `off`             | Asks nothing, records nothing. Every agent runs on the model Claude Code gives it.                  |
-| `shadow`          | Decides and records the choice and its list-price cost in the Usage tab; the agent runs unchanged. |
-| `on`              | The default. Sends the decided model, which Claude Code uses in place of the agent's own.           |
+| `subagentRouting` | Behavior                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------- |
+| `off`             | Asks nothing, records nothing. Every agent runs on the model Claude Code gives it.        |
+| `on`              | The default. Sends the decided model, which Claude Code uses in place of the agent's own. |
+
+A file that still sets `"shadow"` is read as not setting it, so subagents are routed (`on`).
 
 **Which agents are routed.** The router reads the definition file of the agent being started: a plugin agent's file under the plugin's install path, a project agent's under `.claude/agents`, your own under `~/.claude/agents`. It routes the agent when its frontmatter:
 
@@ -221,11 +223,11 @@ These agents always keep their model:
 The values above are the defaults.
 
 - `types` overrides the rule for an agent type: a models key, `classify`, or `null` to never route it. A user file adds to the defaults. A key without a colon matches only Claude Code's built-in of that name, such as `Explore`; a project agent named `Explore` replaces the built-in and follows its own definition. A `plugin:name` key matches only that plugin's agent. A listed type is routed even if its definition pins a model.
-- `classify` asks the active classifier, once, with the task's description and prompt. It sends no history and no tool results. The task runs on `heavy` when the classifier gives `high` at least `heavyMass`. It runs on `light` for exploration (the `explore` activity above `policy.activityMass`) or the `micro` tier. Everything else runs on `standard`. Every routed agent not listed in `types` is classified. In `on` the spawn waits up to the classifier's `timeoutMs`, at most 3 seconds; `shadow` never delays a spawn.
+- `classify` asks the active classifier, once, with the task's description and prompt. It sends no history and no tool results. The task runs on `heavy` when the classifier gives `high` at least `heavyMass`. It runs on `light` for exploration (the `explore` activity above `policy.activityMass`) or the `micro` tier. Everything else runs on `standard`. Every routed agent not listed in `types` is classified. In `on` the spawn waits up to the classifier's `timeoutMs`, at most 3 seconds.
 - A classifier failure or a missing key keeps the model Claude Code gives the agent, and so does a model that `availableModels` blocks. So does routing off: `/router off`, or a `/model` choice.
 - A spawn sets a model, not an effort. An agent's `effort` frontmatter still applies.
 
-The Usage tab's **SUBAGENTS** section shows, per agent type, what routing cost against the model Claude Code would have used, and which agents passed through and why. [Evaluation](evaluation.md#subagent-routing) says what to look for. To compare before you trust it, set `"subagentRouting": "shadow"`. To stop it, set `"off"`. Router 1.8 rejects both keys as unknown, so remove `subagentRouting` and `subagents` before you downgrade. Subagent routing needs the `agent.spawn` hook: it is checked on Claude Code 2.1.293 and 2.1.296, and unverified on older builds.
+The Usage tab's **SUBAGENTS** section shows, per agent type, what routing cost against the model Claude Code would have used, and which agents passed through and why. [Evaluation](evaluation.md#subagent-routing) says what to look for. To stop it, set `"off"`. Router 1.8 rejects both keys as unknown, so remove `subagentRouting` and `subagents` before you downgrade. Subagent routing needs the `agent.spawn` hook: it is checked on Claude Code 2.1.293 and 2.1.296, and unverified on older builds.
 
 ## Optional `router.json`
 
@@ -244,7 +246,7 @@ The Mod validates the whole file. Unknown keys and invalid values make routing u
 | ------------------------------ | ------------------------------------------------------------------------------------ | -------------------------------------------------------- |
 | `baselineTier`                 | `micro`, `low`, `medium`, `high`                                                     | `low`                                                    |
 | `routes.<tier>`                | `model`, optional `effort` (a level, or `null` for the session effort)               | As in the route table above                              |
-| `activityRouting`              | `off`, `shadow`, `on`                                                                | `on`                                                     |
+| `activityRouting`              | `off`, `on`                                                                          | `on`                                                     |
 | `activities.<activity>.<tier>` | optional `model` and `effort`, as in `routes`                                        | The overrides in [Activity routing](#activity-routing)   |
 | `models.<alias>`               | `id`, `input`, optional `output`, `cacheRead`, optional `longContext` (`above`, `multiplier`, or `null`), `contextWindow`, `billing`, `efforts` | Three defaults above                                     |
 | `cache`                        | `writeMultiplier`, `ttlMs`, `warmMarginMs`                                           | `5m: 1.25`, `1h: 2`; `300000` / `3600000` ms; `30000` ms |
@@ -252,7 +254,7 @@ The Mod validates the whole file. Unknown keys and invalid values make routing u
 | `classifier`                   | An id in `classifiers`                                                               | `jev`                                                    |
 | `classifiers.<id>`             | `label`, `api`, `endpoint`, `model`, `keyOption`, `timeoutMs`                        | [Classifiers](#classifiers) above                        |
 | `context`                      | `recentTurns`, `maxTextChars`                                                        | `6`, `1200`                                              |
-| `subagentRouting`              | `off`, `shadow`, `on`                                                                | `on`                                                     |
+| `subagentRouting`              | `off`, `on`                                                                          | `on`                                                     |
 | `subagents`                    | `types` (type → models key, `classify` or `null`), `light`, `standard`, `heavy`, `heavyMass` | [Subagent routing](#subagent-routing)            |
 
 Policy defaults:

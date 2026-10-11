@@ -223,27 +223,6 @@ const activityBand = {
     route: 'Sonnet 5.5 · medium',
     reason: '↗ coding',
   },
-  shadow: {
-    view: {
-      mode: 'auto',
-      phase: 'routed',
-      tier: 'low',
-      selectedModel: 'claude-haiku-5-5',
-      effort: 'high',
-      activity: 'code',
-      reason: 'same-tier',
-      wouldRoute: {
-        activity: 'code',
-        tier: 'low',
-        model: 'claude-sonnet-5-5',
-        effort: 'medium',
-        reason: 'activity-up',
-      },
-    },
-    label: 'coding (shadow) → ',
-    route: 'Haiku 5.5 · high',
-    reason: '= fits',
-  },
 };
 
 test('a narrow band drops the activity before the reason and keeps the tier and the route in use', () => {
@@ -267,8 +246,7 @@ test('a narrow band drops the activity before the reason and keeps the tier and 
       );
       const tag = parts.find((p) => p.text === label);
       assert.equal(Boolean(tag), activity, name);
-      if (tag)
-        assert.deepEqual(tag.style, mode === 'shadow' ? { dimColor: true } : { color: '#d77757', italic: true }, name);
+      if (tag) assert.deepEqual(tag.style, { color: '#d77757', italic: true }, name);
     }
   }
 });

@@ -164,20 +164,14 @@ test('a classifier that takes no key is not missing one before its credentials a
 test('/router without a UI surface names the activity and its route, and nothing in off', () => {
   const haiku = { tier: 'low', selectedModel: 'claude-haiku-5-5', effort: 'high' };
   const ops = { activity: 'ops', activityChoice: 'ops', activityProbabilities: { ops: 0.81, code: 0.1 } };
-  const wouldRoute = { activity: 'code', tier: 'low', model: 'claude-sonnet-5-5', effort: 'medium', reason: 'x' };
   for (const [mode, view, expected] of [
     ['on', { ...haiku, ...ops }, ['Activity: ops (81%)', 'Route: low + ops → Haiku 5.5 · high (base)']],
-    [
-      'shadow',
-      { ...haiku, activity: 'code', activityChoice: 'code', activityProbabilities: { code: 0.7 }, wouldRoute },
-      ['Activity: code (70%)', 'Route: low + code would use Sonnet 5.5 · medium (shadow; using Haiku 5.5 · high)'],
-    ],
     [
       'on',
       { ...haiku, activityChoice: 'uncertain', activityProbabilities: { uncertain: 0.5 } },
       ['Activity: uncertain (50%)', 'Route: low → Haiku 5.5 · high (base)'],
     ],
-    ['shadow', { phase: 'ready' }, ['Activity: none yet']],
+    ['on', { phase: 'ready' }, ['Activity: none yet']],
     ['off', { ...haiku, ...ops }, []],
   ])
     assert.deepEqual(activityDetailLines({ ...DEFAULTS, activityRouting: mode }, view), expected, `${mode}`);
@@ -189,7 +183,6 @@ test('the /router agreement line adds code, ops and explore only when those were
     confusion,
     runs: {},
     lateral: { taken: 0, refused: 0 },
-    shadow: { differs: 0, turns: 0 },
   });
   for (const [name, activityStore, expected] of [
     ['no store', null, 'Agreement across sessions: no labelled turns yet'],
@@ -256,12 +249,6 @@ test('Why names the cell for an activity move or a stay on an override, and keep
       on,
       { tier: 'low', activity: 'code', reason: 'downgrade' },
       'enough support for a cheaper model',
-    ],
-    [
-      'shadow keeps the reason',
-      { ...DEFAULTS, activityRouting: 'shadow' },
-      { tier: 'low', activity: 'code', reason: 'same-tier' },
-      'the task fits the current tier',
     ],
     ['before a turn', on, { tier: null, activity: null, reason: 'ready' }, 'ready for the next turn'],
   ])
