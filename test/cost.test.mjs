@@ -79,6 +79,12 @@ test('only the models that keep one cache across efforts share it, and never whe
   assert.equal(native.cacheKey(DEFAULTS, 'claude-haiku-5-5', null), 'claude-haiku-5-5');
 });
 
+test('every default model is checked against the shared-cache list', () => {
+  // A new default model needs a decision: add it to EFFORT_SHARED_CACHE when its docs say efforts share one cache.
+  for (const [alias, { id }] of Object.entries(DEFAULTS.models))
+    assert.equal(native.effortSharesCache(DEFAULTS, id), true, `${alias} ${id}`);
+});
+
 test('bounds distinguish observed cached prefix from generated and uncached tokens', () => {
   const bounds = native.inputBounds(SONNET_MEDIUM, resolveRoute(SONNET_MEDIUM, 'medium'), 151_500, facts, now);
   near(bounds.min, 0.0366);

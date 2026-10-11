@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { emptyStore } from '../lib/activity-stats.mjs';
 import {
   CLEF_FLASH_ANSWER,
   CLOUDFLARE_KEYS,
@@ -13,7 +14,7 @@ import {
   TINY_ROUTER,
   texts,
 } from './harness.mjs';
-import { jevResponse } from './helpers.mjs';
+import { jevResponse, savedCounts } from './helpers.mjs';
 
 test('clear discards unsaved tuning and preserves active configuration', async () => {
   const h = harness();
@@ -694,7 +695,14 @@ test('Reset stats clears activity and routing vs your model, the session counts 
   await drain(h.step(step));
   await h.event('turn.complete', { turnId: 't1' });
   assert.equal(h.view().activityStats.byActivity.code.turns, 1);
-  assert.deepEqual(h.preferences.get('activity:stats:v1').confusion, { code: { talk: 1 } });
+  assert.deepEqual(h.preferences.get('activity:stats:v1:s1').confusion, { code: { talk: 1 } });
+  h.preferences.set('activity:stats:v1:s0', h.preferences.get('activity:stats:v1:s1'));
+  h.preferences.set('activity:stats:v1', {
+    version: 1,
+    confusion: { ops: { ops: 2 } },
+    runs: {},
+    lateral: { taken: 1, refused: 0 },
+  });
   assert.deepEqual(h.view().activityStore.confusion, { code: { talk: 1 } });
   assert.equal(h.view().savings.replies, 1);
   assert.equal(h.preferences.get('savings:v1:s1').replies, 1);
@@ -705,7 +713,7 @@ test('Reset stats clears activity and routing vs your model, the session counts 
   await press(h, 'reset-stats');
   assert.equal(h.view().activityStats, null);
   assert.equal(h.view().savings, null);
-  assert.deepEqual(h.view().activityStore, h.preferences.get('activity:stats:v1'));
+  assert.deepEqual(h.view().activityStore, emptyStore());
   assert.equal(h.view().savingsStore.replies, 0);
   assert.deepEqual(
     [...h.preferences.keys()].filter((key) => key.startsWith('savings:')),
@@ -715,14 +723,8 @@ test('Reset stats clears activity and routing vs your model, the session counts 
   assert.equal(h.view().notice, 'Stats reset: activity and routing vs your model, this session and saved.');
   await press(h, 'tab-classifier');
   assert.ok(!texts(await h.render()).includes('ACROSS SESSIONS · since the last reset'));
-  assert.deepEqual(h.preferences.get('activity:stats:v1'), {
-    version: 1,
-    confusion: {},
-    runs: {},
-    lateral: { taken: 0, refused: 0 },
-  });
   assert.deepEqual(
-    [...h.preferences.keys()].filter((key) => key.startsWith('activity:metrics:')),
+    [...h.preferences.keys()].filter((key) => key.startsWith('activity:')),
     [],
   );
   assert.deepEqual(h.view().activityMetrics, {
@@ -743,18 +745,26 @@ test('opening the pane reloads the counts another session added', async () => {
     runs: {},
     lateral: { taken: 2, refused: 0 },
   });
+  h.preferences.set('activity:stats:v1:s0', {
+    version: 1,
+    since: 1,
+    confusion: { code: { code: 1 } },
+    runs: {},
+    lateral: { taken: 1, refused: 0 },
+  });
   await h.event('command.run', { command: 'router', args: '' });
-  assert.equal(h.view().activityStore.lateral.taken, 2);
+  assert.equal(h.view().activityStore.lateral.taken, 3);
   await press(h, 'tab-classifier');
   const lines = texts(await h.render());
-  assert.ok(lines.includes('Agreement  classifier vs tools: 3 of 3 turns (100%)'));
-  assert.ok(lines.includes('Code/ops/explore  classifier vs tools: 3 of 3 turns (100%)'));
+  assert.ok(lines.includes('Agreement  classifier vs tools: 4 of 4 turns (100%)'));
+  assert.ok(lines.includes('Code/ops/explore  classifier vs tools: 4 of 4 turns (100%)'));
 });
 
 test('Reset stats during a turn completion is not undone by that turn', async () => {
-  const STORE = 'activity:stats:v1';
+  const RESET = 'savings:reset:v1';
   const earlier = {
     version: 1,
+    since: 1,
     confusion: { code: { code: 4 } },
     runs: {},
     lateral: { taken: 2, refused: 1 },
@@ -762,13 +772,14 @@ test('Reset stats during a turn completion is not undone by that turn', async ()
   let gate = null;
   const preferences = new (class extends Map {
     get(key) {
-      if (key !== STORE || !gate) return super.get(key);
+      if (key !== RESET || !gate) return super.get(key);
+      // The turn reads the marker once per record it writes, and may read it for several at once.
       const { promise, resolve } = Promise.withResolvers();
-      gate.resolve = resolve;
+      gate.waiting.push(resolve);
       gate.reached();
       return promise;
     }
-  })([[STORE, earlier]]);
+  })([['activity:stats:v1:s1', earlier]]);
   const h = harness({ typesafe_api_key: 'synthetic-key' }, preferences);
   h.http(async () => ({
     ok: true,
@@ -781,26 +792,28 @@ test('Reset stats during a turn completion is not undone by that turn', async ()
   await start(h);
   await drain(h.step(step));
   const reached = Promise.withResolvers();
-  gate = { reached: reached.resolve };
+  gate = { reached: reached.resolve, waiting: [] };
   const completing = h.event('turn.complete', { turnId: 't1' });
   await reached.promise;
   const read = gate;
-  gate = null;
   await press(h, 'tab-usage');
+  gate = null;
   await press(h, 'reset-stats');
-  read.resolve(earlier);
+  // The marker as the turn read it, before the reset wrote it.
+  for (const resolve of read.waiting) resolve(undefined);
   await completing;
   assert.equal(h.view().notice, 'Stats reset: activity and routing vs your model, this session and saved.');
-  assert.deepEqual(h.preferences.get(STORE), {
+  assert.deepEqual(savedCounts(h.preferences), {
     version: 1,
     confusion: {},
     runs: {},
     lateral: { taken: 0, refused: 0 },
   });
+  assert.deepEqual(h.view().activityStore, emptyStore());
 });
 
 test('Reset stats while a turn writes its counts leaves the readout empty', async () => {
-  const STORE = 'activity:stats:v1';
+  const STORE = 'activity:stats:v1:s1';
   let gate = null;
   const preferences = new (class extends Map {
     set(key, value) {
@@ -833,10 +846,10 @@ test('Reset stats while a turn writes its counts leaves the readout empty', asyn
   await press(h, 'reset-stats');
   write.resolve();
   await completing;
-  assert.equal(h.preferences.get(STORE).lateral.taken, 0);
+  assert.equal(h.preferences.get(STORE), undefined);
   assert.equal(h.preferences.get('activity:metrics:v1:s1'), undefined);
   assert.deepEqual(h.view().activityMetrics.latency, {});
-  assert.deepEqual(h.view().activityStore, h.preferences.get(STORE));
+  assert.deepEqual(h.view().activityStore, emptyStore());
   await press(h, 'tab-classifier');
   assert.ok(!texts(await h.render()).includes('ACROSS SESSIONS · since the last reset'));
 });

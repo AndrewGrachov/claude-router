@@ -9,5 +9,5 @@
     "moduleResolution": "NodeNext",
     "target": "ES2023"
   },
-  "include": ["lib/**/*.mjs"]
+  "include": ["lib/**/*.mjs", "hooks/**/*.mjs"]
 }

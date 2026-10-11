@@ -6,6 +6,7 @@ import {
   emptyStore,
   METRICS_PREFIX,
   mergeMetrics,
+  mergeStores,
   metricsAfterReset,
   readMetrics,
   readStore,
@@ -13,6 +14,8 @@ import {
   recordStore,
   recordTurn,
   STORE_KEY,
+  STORE_PREFIX,
+  storeAfterReset,
   turnActivity,
 } from '../lib/activity-stats.mjs';
 import { renderBand, switchToast } from '../lib/band.mjs';
@@ -114,6 +117,47 @@ const BAND_DETAIL = 'band:detail';
 const MODE_PREFIX = 'mode:';
 const isSet = (value) => /^(1|true|yes|on)$/i.test(String(value ?? '').trim());
 
+// The counts kept across sessions: each session writes only its own record of a kind, `prefix` and its session id,
+// because $.store has no atomic update; the view's `field` shows every session's record since the last reset added
+// up. One marker, SAVINGS_RESET_KEY, resets them all. `legacy` is the key all sessions shared before 1.10.3: it counts
+// as another session's record until a reset deletes it.
+const LEDGERS = {
+  savings: {
+    prefix: SAVINGS_PREFIX,
+    field: 'savingsStore',
+    read: readSavingsStore,
+    afterReset,
+    merge: mergeSavingsStores,
+    empty: emptySavingsStore,
+  },
+  metrics: {
+    prefix: METRICS_PREFIX,
+    field: 'activityMetrics',
+    read: readMetrics,
+    afterReset: metricsAfterReset,
+    merge: mergeMetrics,
+    empty: emptyMetrics,
+  },
+  subagents: {
+    prefix: SUBAGENT_PREFIX,
+    field: 'subagentStore',
+    read: readSubagentStore,
+    afterReset: subagentsAfterReset,
+    merge: mergeSubagentStores,
+    empty: emptySubagentStore,
+  },
+  activity: {
+    prefix: STORE_PREFIX,
+    legacy: STORE_KEY,
+    field: 'activityStore',
+    read: readStore,
+    afterReset: storeAfterReset,
+    merge: mergeStores,
+    empty: emptyStore,
+  },
+};
+const LEDGER_KINDS = Object.keys(LEDGERS);
+
 // Everything the hooks change between events, in one object `register()` creates and passes to its helpers. Module
 // variables, not $.state: a reload starts them over, and the view is written through to $.state as it changes.
 function createRouter(options) {
@@ -141,24 +185,25 @@ function createRouter(options) {
     offSwitches: 0,
     // Each turn's routing-vs-your-model totals until turn.complete adds them to the store.
     turnSavings: new Map(),
-    // The totals kept across sessions: this session's record (`{ sessionId, record }`), held here so a refresh never
-    // reads it back from the store while a write of it is pending, and the sum of every other session's, read on
-    // refresh. The view shows their sum.
-    savingsOwn: null,
-    savingsOthers: null,
-    // The activity metrics kept across sessions, held the same way: this session's record and the others' sum.
-    metricsOwn: null,
-    metricsOthers: null,
+    // The counts kept across sessions, by LEDGERS kind: this session's record (`own`, `{ sessionId, record }`), held
+    // here so a refresh never reads it back from the store while a write of it is pending, and the sum of every other
+    // session's (`others`), read on refresh. The view shows their sum.
+    // `othersResetAt` is the reset marker the others were read under: a newer one means they are read again.
+    ledgers: Object.fromEntries(
+      Object.keys(LEDGERS).map((kind) => [kind, { own: null, others: null, othersResetAt: null }]),
+    ),
     // Bumped by Reset activity stats, so a store write that read the counts before the reset skips.
     statsResets: 0,
+    // Bumped by each pin press, and each pinned turn's count when its route was written: the pin is used up when the
+    // first request goes out on that route, unless it was pressed again meanwhile.
+    pinPresses: 0,
+    turnPins: new Map(),
     // Each spawned agent's record by agentId (spawnRecord), and when each parent loop last finished an agent of a type,
-    // for respawns. The subagent totals kept across sessions, held as the savings records are.
+    // for respawns.
     agents: new Map(),
     finished: new Map(),
     // Each agent type's definition frontmatter by provider and type, read once per session (agentDefinition).
     definitions: new Map(),
-    subagentsOwn: null,
-    subagentsOthers: null,
   };
 }
 
@@ -221,107 +266,85 @@ async function updateView($, router, patch) {
   await $.state.set(VIEW, router.view);
 }
 
-// This session's record kept across sessions, read from the store once per session, and the last reset (ms) from
-// any session, read each time: a Reset in another session empties a record held from before it.
-async function ownSavings($, router) {
+// This session's record of `kind`, read from the store once per session, and the last reset (ms) from any session,
+// read each time: a Reset in another session empties a record held from before it.
+async function ownRecord($, router, kind) {
+  const { prefix, read, afterReset } = LEDGERS[kind];
+  const held = router.ledgers[kind];
   const sessionId = await $.session.id();
   const resetAt = await $.store.get(SAVINGS_RESET_KEY);
-  if (router.savingsOwn?.sessionId !== sessionId) {
-    const record = readSavingsStore(await $.store.get(`${SAVINGS_PREFIX}${sessionId}`));
+  if (held.own?.sessionId !== sessionId) {
+    const record = read(await $.store.get(`${prefix}${sessionId}`));
     // Another call may have read it meanwhile and a turn added to it: that one stands.
-    if (router.savingsOwn?.sessionId !== sessionId) router.savingsOwn = { sessionId, record };
+    if (held.own?.sessionId !== sessionId) held.own = { sessionId, record };
   }
-  router.savingsOwn.record = afterReset(router.savingsOwn.record, resetAt);
-  return { own: router.savingsOwn, resetAt };
+  held.own.record = afterReset(held.own.record, resetAt);
+  return { own: held.own, resetAt };
 }
 
-// Every other session's record since the last reset, added up.
-async function otherSavings($, sessionId, resetAt) {
-  const own = `${SAVINGS_PREFIX}${sessionId}`;
-  const keys = (await $.store.keys()).filter((key) => key.startsWith(SAVINGS_PREFIX) && key !== own);
-  return mergeSavingsStores(await Promise.all(keys.map((key) => $.store.get(key))), resetAt);
+// Every other session's record of `kind` since the last reset, added up and held. `keys` is one $.store.keys() listing.
+async function readOthers($, router, kind, { sessionId, resetAt, keys }) {
+  const { prefix, legacy, merge } = LEDGERS[kind];
+  const own = `${prefix}${sessionId}`;
+  const names = keys.filter((key) => (key.startsWith(prefix) && key !== own) || key === legacy);
+  const others = merge(await Promise.all(names.map((key) => $.store.get(key))), resetAt);
+  router.ledgers[kind] = { ...router.ledgers[kind], others, othersResetAt: resetAt ?? null };
 }
 
-// This session's metrics record and the last reset, as ownSavings: Reset stats clears both with one marker.
-async function ownMetrics($, router) {
-  const sessionId = await $.session.id();
-  const resetAt = await $.store.get(SAVINGS_RESET_KEY);
-  if (router.metricsOwn?.sessionId !== sessionId) {
-    const record = readMetrics(await $.store.get(`${METRICS_PREFIX}${sessionId}`));
-    if (router.metricsOwn?.sessionId !== sessionId) router.metricsOwn = { sessionId, record };
+// The view's sums of `kinds`, this session's record and the others', from what the router holds; a kind whose others
+// were never read gives nothing.
+function ledgerView(router, kinds = LEDGER_KINDS) {
+  const patch = {};
+  for (const kind of kinds) {
+    const { others, own } = router.ledgers[kind];
+    if (others) patch[LEDGERS[kind].field] = LEDGERS[kind].merge([others, own?.record]);
   }
-  router.metricsOwn.record = metricsAfterReset(router.metricsOwn.record, resetAt);
-  return { own: router.metricsOwn, resetAt };
+  return patch;
 }
 
-// Every other session's metrics since the last reset, added up.
-async function otherMetrics($, sessionId, resetAt) {
-  const own = `${METRICS_PREFIX}${sessionId}`;
-  const keys = (await $.store.keys()).filter((key) => key.startsWith(METRICS_PREFIX) && key !== own);
-  return mergeMetrics(await Promise.all(keys.map((key) => $.store.get(key))), resetAt);
-}
-
-// This session's subagent record and the last reset, as ownSavings: Reset stats clears it with the same marker.
-async function ownSubagents($, router) {
-  const sessionId = await $.session.id();
-  const resetAt = await $.store.get(SAVINGS_RESET_KEY);
-  if (router.subagentsOwn?.sessionId !== sessionId) {
-    const record = readSubagentStore(await $.store.get(`${SUBAGENT_PREFIX}${sessionId}`));
-    if (router.subagentsOwn?.sessionId !== sessionId) router.subagentsOwn = { sessionId, record };
+// Adds to this session's record of `kind` (`add(record, now)` returns the record itself when it adds nothing) and
+// writes it. A record read before a Reset is never written back: the reset counter is compared after the reads. The
+// record is added to in memory before the write, so a refresh during the write counts it once. True when the view
+// may show the new sums: no reset ran meanwhile.
+async function addToLedger($, router, kind, add) {
+  const resets = router.statsResets;
+  const { own, resetAt } = await ownRecord($, router, kind);
+  const held = router.ledgers[kind];
+  // The others held from before a reset in another session are read again: a record from before 1.10.3 has no
+  // `since` to tell.
+  if (!held.others || held.othersResetAt !== (resetAt ?? null))
+    await readOthers($, router, kind, { sessionId: own.sessionId, resetAt, keys: await $.store.keys() });
+  if (router.statsResets !== resets) return false;
+  const record = add(own.record, Date.now());
+  if (record !== own.record) {
+    own.record = record;
+    await $.store.set(`${LEDGERS[kind].prefix}${own.sessionId}`, record);
   }
-  router.subagentsOwn.record = subagentsAfterReset(router.subagentsOwn.record, resetAt);
-  return { own: router.subagentsOwn, resetAt };
+  return router.statsResets === resets;
 }
-
-// Every other session's subagent record since the last reset, added up.
-async function otherSubagents($, sessionId, resetAt) {
-  const own = `${SUBAGENT_PREFIX}${sessionId}`;
-  const keys = (await $.store.keys()).filter((key) => key.startsWith(SUBAGENT_PREFIX) && key !== own);
-  return mergeSubagentStores(await Promise.all(keys.map((key) => $.store.get(key))), resetAt);
-}
-
-// The view's subagent totals, this session's and the others', from what the router holds; nothing until a read
-// succeeded.
-const subagentView = (router) =>
-  router.subagentsOthers
-    ? { subagentStore: mergeSubagentStores([router.subagentsOthers, router.subagentsOwn?.record]) }
-    : {};
-
-const metricsView = (router) => mergeMetrics([router.metricsOthers, router.metricsOwn?.record]);
-
-// The view's totals kept across sessions, from what the router holds; nothing until a read succeeded.
-const savedView = (router) =>
-  router.savingsOthers ? { savingsStore: mergeSavingsStores([router.savingsOthers, router.savingsOwn?.record]) } : {};
 
 // The counts kept across sessions for the view, read when the session starts and the pane opens: another session
-// may have added to them. A failed read keeps what the view has; it never breaks a turn or a render. The saved
-// totals are taken from the router after the reads, so a turn that finished meanwhile counts once.
+// may have added to them. A failed read keeps what the view has; it never breaks a turn or a render. The sums are
+// taken from the router after the reads, so a turn that finished meanwhile counts once; a Reset meanwhile gives
+// nothing, as the reset view stands.
 async function storeView($, router) {
-  const out = {};
+  const resets = router.statsResets;
   try {
-    out.activityStore = readStore(await $.store.get(STORE_KEY));
+    const keys = await $.store.keys();
+    for (const kind of LEDGER_KINDS) {
+      try {
+        const { own, resetAt } = await ownRecord($, router, kind);
+        await readOthers($, router, kind, { sessionId: own.sessionId, resetAt, keys });
+      } catch {}
+    }
   } catch {}
-  try {
-    const { own, resetAt } = await ownMetrics($, router);
-    router.metricsOthers = await otherMetrics($, own.sessionId, resetAt);
-    out.activityMetrics = metricsView(router);
-  } catch {}
-  try {
-    const { own, resetAt } = await ownSavings($, router);
-    router.savingsOthers = await otherSavings($, own.sessionId, resetAt);
-  } catch {}
-  try {
-    const { own, resetAt } = await ownSubagents($, router);
-    router.subagentsOthers = await otherSubagents($, own.sessionId, resetAt);
-    Object.assign(out, subagentView(router));
-  } catch {}
-  return out;
+  return router.statsResets === resets ? ledgerView(router) : {};
 }
 
 // A notice answers the last press in the pane, so the pane opens without one; the last write keeps its Undo in the
 // status bar.
 async function openPane($, router) {
-  await updateView($, router, { notice: null, ...(await storeView($, router)), ...savedView(router) });
+  await updateView($, router, { notice: null, ...(await storeView($, router)) });
   await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true, closeOnEscape: true });
 }
 
@@ -349,6 +372,7 @@ async function setPin($, router, tier) {
   if (view.phase === 'unavailable') return unavailableText(view);
   const mode = await modeOf($, router, view.mode);
   if (mode === 'manual') return 'Routing is off. Turn routing on before pinning a turn.';
+  router.pinPresses += 1;
   await updateView($, router, { pendingPin: tier });
   return `${tier} pinned for the next turn and its tool continuations.`;
 }
@@ -548,7 +572,8 @@ async function* passMain($, e, next, loop, version, nativeModel, reason, router)
 
 // One turn's classification and route, written to the loop at `loopVersion`: the loop and its new version, or null
 // when the turn was aborted, left the session or Auto, or lost the write. `signal` is the step's: its abort cancels
-// the classifier call. The pin is the one in `view`, the view as the step read it.
+// the classifier call. The pin is the one in `view`, the view as the step read it; it is used up only once the route
+// is written, so a turn interrupted before then leaves it for the next.
 async function decideTurn($, router, e, signal, step) {
   const { sessionId, view, cfg, loop, loopVersion, context, nativeModel, availableModels } = step;
   const ref = { ...LOOP, id: 'main' };
@@ -560,8 +585,11 @@ async function decideTurn($, router, e, signal, step) {
   const live = async () => !controller.signal.aborted && (await $.session.id()) === sessionId;
   try {
     const pin = view.pendingPin;
-    const credentials = await resolveCredentials(activeClassifier(cfg), (name) => settingOf($, router.options, name));
-    const messages = await $.session.messages({ as: 'api' });
+    const pinPresses = router.pinPresses;
+    const [credentials, messages] = await Promise.all([
+      resolveCredentials(activeClassifier(cfg), (name) => settingOf($, router.options, name)),
+      $.session.messages({ as: 'api' }),
+    ]);
     if (!(await live())) return null;
     const facts = nativeFacts(cfg, loop, {
       messages,
@@ -574,7 +602,6 @@ async function decideTurn($, router, e, signal, step) {
       phase: 'choosing',
       activeTurnId: e.turnId,
       nativeModel,
-      pendingPin: null,
       credentials: { ...router.view?.credentials, [cfg.classifier]: credentials.missing },
     });
     const adviceStarted = Date.now();
@@ -606,6 +633,8 @@ async function decideTurn($, router, e, signal, step) {
     });
     selected.engineModel = e.model;
     const written = await $.state.set(ref, selected, { ifVersion: loopVersion });
+    // The written route serves the turn's next steps, even if an abort lands now.
+    if (written.isSet && pin) router.turnPins.set(e.turnId, pinPresses);
     // Manual, /clear and turn completion abort the controller; one may land during the write.
     if (!written.isSet || controller.signal.aborted) return null;
     if (previous?.model && previous.model !== selected.decision.model && !selected.decision.pinned)
@@ -759,20 +788,11 @@ async function addSavings($, router, turnId, compared, tier) {
   } catch {}
 }
 
-// A finished turn's totals added to this session's record kept across sessions, with the guard recordActivity uses:
-// totals read before a reset are not written back. The record is added to in memory before the write, so a refresh
-// during the write counts the turn once.
+// A finished turn's totals added to this session's record kept across sessions.
 async function flushSavings($, router, totals) {
   try {
-    const resets = router.statsResets;
-    const { own, resetAt } = await ownSavings($, router);
-    // The others held from before a reset in another session are read again.
-    if (!router.savingsOthers || afterReset(router.savingsOthers, resetAt) !== router.savingsOthers)
-      router.savingsOthers = await otherSavings($, own.sessionId, resetAt);
-    if (router.statsResets !== resets) return;
-    own.record = recordSavingsStore(own.record, totals, Date.now());
-    await $.store.set(`${SAVINGS_PREFIX}${own.sessionId}`, own.record);
-    if (router.statsResets === resets) await updateView($, router, savedView(router));
+    if (await addToLedger($, router, 'savings', (record, now) => recordSavingsStore(record, totals, now)))
+      await updateView($, router, ledgerView(router, ['savings']));
   } catch {}
 }
 
@@ -814,90 +834,72 @@ async function recordActivity($, router, turn) {
         lateral: turn.lateral,
       }),
     });
-    const resets = router.statsResets;
-    const store = readStore(await $.store.get(STORE_KEY));
-    const { own, resetAt } = await ownMetrics($, router);
-    // The others held from before a reset in another session are read again.
-    if (!router.metricsOthers || metricsAfterReset(router.metricsOthers, resetAt) !== router.metricsOthers)
-      router.metricsOthers = await otherMetrics($, own.sessionId, resetAt);
-    // Writing counts read before a reset would bring them back; this turn's are lost instead.
-    if (router.statsResets !== resets) return;
-    const written = recordStore(store, {
-      predicted: turn.predicted,
-      observed,
-      runEnded: ended,
-      lateral: turn.lateral,
-    });
-    const measured = recordMetrics(own.record, {
-      classifier: turn.classifier,
-      adviceMs: turn.adviceMs,
-      downMove: down.event,
-      now: Date.now(),
-    });
-    // Added to in memory before the write, so a refresh during the write counts the turn once.
-    const changed = measured !== own.record;
-    own.record = measured;
-    // Both writes start before any reset can run between them.
-    await Promise.all([
-      $.store.set(STORE_KEY, written),
-      changed ? $.store.set(`${METRICS_PREFIX}${own.sessionId}`, measured) : null,
+    // Writing counts read before a reset would bring them back; this turn's are lost instead. A reset during a write
+    // empties the view; these counts are older than it. Each record is written on its own: a failed write of one
+    // keeps the other.
+    const stats = { predicted: turn.predicted, observed, runEnded: ended, lateral: turn.lateral };
+    const metrics = { classifier: turn.classifier, adviceMs: turn.adviceMs, downMove: down.event };
+    const shown = await Promise.all([
+      addToLedger($, router, 'activity', (record, now) => recordStore(record, stats, now)).catch(() => false),
+      addToLedger($, router, 'metrics', (record, now) => recordMetrics(record, { ...metrics, now })).catch(() => false),
     ]);
-    // A reset during the write emptied the view; these counts are older than it.
-    if (router.statsResets === resets)
-      await updateView($, router, { activityStore: written, activityMetrics: metricsView(router) });
+    const kinds = ['activity', 'metrics'].filter((_, i) => shown[i]);
+    if (kinds.length) await updateView($, router, ledgerView(router, kinds));
   } catch {}
 }
 
 // The session's open run ends with it; without this flush it is never counted.
-async function flushRun($, run) {
+async function flushRun($, router, run) {
   try {
-    const store = readStore(await $.store.get(STORE_KEY));
     const ended = { predicted: null, observed: null, runEnded: run, lateral: null };
-    await $.store.set(STORE_KEY, recordStore(store, ended));
+    await addToLedger($, router, 'activity', (record, now) => recordStore(record, ended, now));
   } catch {}
 }
 
 // The frontmatter of the agent file a spawn starts (agentFrontmatter), or null when it cannot be found or read. Read
-// once per provider and type in a session, and never for a built-in, whose definition is not on disk.
+// once per provider and type in a session, and never for a built-in, whose definition is not on disk. A read that
+// failed is not kept: the next spawn of the type reads again.
 async function agentDefinition($, router, e) {
   const plugin = e.provider?.plugin;
   if (typeof plugin !== 'string' || plugin === 'engine' || typeof e.subagentType !== 'string') return null;
   const key = `${plugin} ${e.subagentType}`;
-  if (!router.definitions.has(key)) router.definitions.set(key, await findDefinition($, plugin, e.subagentType));
+  if (!router.definitions.has(key)) {
+    try {
+      router.definitions.set(key, await findDefinition($, plugin, e.subagentType));
+    } catch {
+      return null;
+    }
+  }
   return router.definitions.get(key);
 }
 
 // A plugin agent (provider `plugin@marketplace`) is looked up under each install path installed_plugins.json gives
 // that plugin, the files Claude Code itself loads; any other agent under the session's .claude/agents, then the
 // profile's agents. Every match must agree on the model, or the definition is unknown. Limit: a plugin that keeps its
-// agents outside `agents/` reads as unknown, so its agents pass through.
+// agents outside `agents/` reads as unknown, so its agents pass through. Throws when a file cannot be read.
 async function findDefinition($, plugin, type) {
-  try {
-    const home = await $.env.get('HOME');
-    const profile = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`;
-    const name = type.slice(type.indexOf(':') + 1);
-    const fromPlugin = plugin.includes('@');
-    const dirs = fromPlugin
-      ? (JSON.parse(await $.fs.read(`${profile}/plugins/installed_plugins.json`)).plugins?.[plugin] ?? []).map(
-          (entry) => `${entry.installPath}/agents`,
-        )
-      : [`${await $.session.cwd()}/.claude/agents`, `${profile}/agents`];
-    const found = [];
-    for (const dir of dirs) {
-      if (!(await $.fs.exists(dir))) continue;
-      for (const entry of await $.fs.list(dir)) {
-        if (entry.kind === 'dir' || !entry.name.endsWith('.md')) continue;
-        const definition = agentFrontmatter(await $.fs.read(`${dir}/${entry.name}`));
-        if (definition && (definition.name ?? entry.name.slice(0, -3)) === name) found.push(definition);
-      }
-      // A project agent replaces a user agent of the same name.
-      if (found.length && !fromPlugin) break;
+  const home = await $.env.get('HOME');
+  const profile = (await $.env.get('CLAUDE_CONFIG_DIR')) ?? `${home}/.claude`;
+  const name = type.slice(type.indexOf(':') + 1);
+  const fromPlugin = plugin.includes('@');
+  const dirs = fromPlugin
+    ? (JSON.parse(await $.fs.read(`${profile}/plugins/installed_plugins.json`)).plugins?.[plugin] ?? []).map(
+        (entry) => `${entry.installPath}/agents`,
+      )
+    : [`${await $.session.cwd()}/.claude/agents`, `${profile}/agents`];
+  const found = [];
+  for (const dir of dirs) {
+    if (!(await $.fs.exists(dir))) continue;
+    for (const entry of await $.fs.list(dir)) {
+      if (entry.kind === 'dir' || !entry.name.endsWith('.md')) continue;
+      const definition = agentFrontmatter(await $.fs.read(`${dir}/${entry.name}`));
+      if (definition && (definition.name ?? entry.name.slice(0, -3)) === name) found.push(definition);
     }
-    const agree = found.every((d) => d.model === found[0].model && d.modelRouting === found[0].modelRouting);
-    return found.length && agree ? found[0] : null;
-  } catch {
-    return null;
+    // A project agent replaces a user agent of the same name.
+    if (found.length && !fromPlugin) break;
   }
+  const agree = found.every((d) => d.model === found[0].model && d.modelRouting === found[0].modelRouting);
+  return found.length && agree ? found[0] : null;
 }
 
 // The spawn path's classifier client: a breaker of its own, so spawn failures never pause main-turn routing, and no
@@ -933,8 +935,9 @@ async function decideSpawn($, router, cfg, e, definition, signal) {
   }
   // The full id, not an alias: a family alias would resolve to the parent's exact model when the families match.
   const model = alias ? cfg.models[alias].id : null;
-  const settings = await $.settings.read().catch(() => ({}));
-  if (!model || !isModelAllowed(model, settings.availableModels, e.parentModel))
+  // Settings that cannot be read may hold an availableModels list, so the model is not sent.
+  const settings = await $.settings.read().catch(() => null);
+  if (!model || !settings || !isModelAllowed(model, settings.availableModels, e.parentModel))
     return { choice: 'core', model: null, failed };
   return { choice: alias, model, failed };
 }
@@ -1016,21 +1019,15 @@ async function finishAgent($, router, agentId) {
   await flushSubagents($, router, [agent]);
 }
 
-// Agents' counts added to this session's record, with the guard flushSavings uses: counts read before a reset are not
-// written back. Stats never break a turn: a failed read or write loses these counts.
+// This session's agents' counts added to its record kept across sessions. Stats never break a turn: a failed read or
+// write loses these counts.
 async function flushSubagents($, router, agents) {
   try {
-    const resets = router.statsResets;
-    const { own, resetAt } = await ownSubagents($, router);
-    const mine = agents.filter((agent) => agent.sessionId === own.sessionId);
+    const sessionId = await $.session.id();
+    const mine = agents.filter((agent) => agent.sessionId === sessionId);
     if (!mine.length) return;
-    if (!router.subagentsOthers || subagentsAfterReset(router.subagentsOthers, resetAt) !== router.subagentsOthers)
-      router.subagentsOthers = await otherSubagents($, own.sessionId, resetAt);
-    if (router.statsResets !== resets) return;
-    const now = Date.now();
-    own.record = mine.reduce((record, agent) => recordAgent(record, agent, now), own.record);
-    await $.store.set(`${SUBAGENT_PREFIX}${own.sessionId}`, own.record);
-    if (router.statsResets === resets) await updateView($, router, subagentView(router));
+    const add = (record, now) => mine.reduce((sum, agent) => recordAgent(sum, agent, now), record);
+    if (await addToLedger($, router, 'subagents', add)) await updateView($, router, ledgerView(router, ['subagents']));
   } catch {}
 }
 
@@ -1193,40 +1190,28 @@ function paneActions($, router, view) {
       router.afterDown = null;
       router.turnSavings.clear();
       for (const [id, agent] of router.agents) router.agents.set(id, flushedAgent(agent));
-      const clear = (key, value) =>
-        $.store
-          .set(key, value)
-          .then(() => true)
-          .catch(() => false);
-      // The per-session records: savings and activity metrics.
+      // Every session's records. The marker is written first, so a session still holding its record from before the
+      // reset drops it, unless that record's first count has the reset's millisecond or the clock moved back across
+      // the reset.
       const clearRecords = async () => {
-        // Written first, so a session still holding its record from before the reset drops it, unless that record's
-        // first reading has the reset's millisecond or the clock moved back across the reset.
-        await $.store.set(SAVINGS_RESET_KEY, Date.now());
+        const resetAt = Date.now();
+        await $.store.set(SAVINGS_RESET_KEY, resetAt);
         const keys = (await $.store.keys()).filter((key) =>
-          [SAVINGS_PREFIX, METRICS_PREFIX, SUBAGENT_PREFIX].some((prefix) => key.startsWith(prefix)),
+          Object.values(LEDGERS).some(({ prefix, legacy }) => key.startsWith(prefix) || key === legacy),
         );
         await Promise.all(keys.map((key) => $.store.delete(key)));
-        router.savingsOwn = null;
-        router.savingsOthers = emptySavingsStore();
-        router.metricsOwn = null;
-        router.metricsOthers = emptyMetrics();
-        router.subagentsOwn = null;
-        router.subagentsOthers = emptySubagentStore();
+        for (const kind of LEDGER_KINDS)
+          router.ledgers[kind] = { own: null, others: LEDGERS[kind].empty(), othersResetAt: resetAt };
         return true;
       };
-      const [stats, records] = await Promise.all([clear(STORE_KEY, emptyStore()), clearRecords().catch(() => false)]);
+      const cleared = await clearRecords().catch(() => false);
       await updateView($, router, {
         activityStats: null,
         savingsBy: {},
-        ...(stats ? { activityStore: emptyStore() } : {}),
-        ...(records
-          ? { activityMetrics: emptyMetrics(), savingsStore: emptySavingsStore(), subagentStore: emptySubagentStore() }
-          : {}),
-        notice:
-          stats && records
-            ? 'Stats reset: activity and routing vs your model, this session and saved.'
-            : 'This session’s stats reset. Saved stats could not be cleared.',
+        ...(cleared ? ledgerView(router) : {}),
+        notice: cleared
+          ? 'Stats reset: activity and routing vs your model, this session and saved.'
+          : 'This session’s stats reset. Saved stats could not be cleared.',
       });
     },
     discardRouting: () => updateView($, router, { routeDraft: null, tuning: null, tuningBase: null, notice: null }),
@@ -1287,12 +1272,13 @@ async function endSession($, router) {
   router.decisions.clear();
   router.prompts.clear();
   router.turnConfigs.clear();
+  router.turnPins.clear();
   router.turnActivities.clear();
   router.turnSavings.clear();
   const run = router.run;
   router.run = null;
   router.afterDown = null;
-  if (run) await flushRun($, run);
+  if (run) await flushRun($, router, run);
   // Agents still running when the session ends: what they did so far is counted.
   const agents = [...router.agents.values()];
   router.agents.clear();
@@ -1356,7 +1342,6 @@ export function register(on, options) {
         lastWrite: null,
         bandDetail: (await $.store.get(BAND_DETAIL).catch(() => false)) === true,
         ...(await storeView($, router)),
-        ...savedView(router),
       });
     } catch (error) {
       await updateView($, router, {
@@ -1404,9 +1389,7 @@ export function register(on, options) {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId) return yield* stepAgent($, router, e, next);
     const cfg = router.turnConfigs.get(e.turnId) ?? router.config;
-    const sessionId = await $.session.id();
-    const nativeModel = await $.session.model();
-    const view = await readView($, router);
+    const [sessionId, nativeModel, view] = await Promise.all([$.session.id(), $.session.model(), readView($, router)]);
     const mode = await modeOf($, router, view.mode);
     if (e.index === 0) {
       const saved = await rememberMode($, mode);
@@ -1426,8 +1409,7 @@ export function register(on, options) {
     if (loop.turnId === e.turnId && isNativeFallback(loop, e.model)) {
       return yield* passMain($, e, next, loop, loopVersion, nativeModel, 'native-fallback', router);
     }
-    const context = await contextOf($, loop);
-    const settings = await $.settings.read();
+    const [context, settings] = await Promise.all([contextOf($, loop), $.settings.read()]);
     const availableModels = settings.availableModels;
     const key = `${sessionId}:${e.turnId}:${loop.generation}`;
     if (loop.turnId !== e.turnId) {
@@ -1465,6 +1447,11 @@ export function register(on, options) {
       });
       await updateView($, router, continuationView(cfg, loop.decision, context));
     }
+    const pinPresses = router.turnPins.get(e.turnId);
+    if (pinPresses !== undefined) {
+      router.turnPins.delete(e.turnId);
+      if (pinPresses === router.pinPresses) await updateView($, router, { pendingPin: null });
+    }
     const request = { ...e, model: loop.decision.model };
     if (loop.decision.effort === null) delete request.effort;
     else request.effort = loop.decision.effort;
@@ -1480,6 +1467,7 @@ export function register(on, options) {
       return next(e);
     }
     router.turnConfigs.delete(e.turnId);
+    router.turnPins.delete(e.turnId);
     router.turnControllers.get(e.turnId)?.abort();
     if (router.view?.activeTurnId === e.turnId && router.view.phase === 'choosing') {
       router.view = { ...router.view, activeTurnId: null };

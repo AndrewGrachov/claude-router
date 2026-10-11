@@ -1,3 +1,5 @@
+import { mergeStores, STORE_KEY, STORE_PREFIX } from '../lib/activity-stats.mjs';
+
 export const T0 = Date.parse('2026-09-22T10:00:00Z');
 
 export function user(text) {
@@ -73,4 +75,18 @@ export function jevResponse(choice, probabilities, continuation = 0, activity = 
         : {}),
     },
   };
+}
+
+// Every session's activity stats record and the shared key from before 1.10.3 added up, as the readout sums them.
+export const savedStats = (preferences) =>
+  mergeStores(
+    [...preferences.entries()]
+      .filter(([key]) => key.startsWith(STORE_PREFIX) || key === STORE_KEY)
+      .map(([, value]) => value),
+  );
+
+// The same without `since`, which depends on the clock.
+export function savedCounts(preferences) {
+  const { since: _since, ...counts } = savedStats(preferences);
+  return counts;
 }

@@ -214,6 +214,29 @@ test('a model availableModels blocks keeps core’s model', async () => {
   assert.equal((await h.spawn(input)).sent, input);
 });
 
+test('settings that cannot be read keep core’s model, as they may limit the models', async () => {
+  const h = await started({ subagentRouting: 'on' });
+  h.$.settings.read = async () => {
+    throw new Error('settings unreadable');
+  };
+  const input = spawnInput();
+  assert.equal((await h.spawn(input)).sent, input);
+});
+
+test('an agent definition that could not be read is read again on the next spawn', async () => {
+  const h = await started();
+  installCcThingz(h, { model: 'haiku', modelRouting: 'auto' });
+  answering(h, HARD);
+  const read = h.$.fs.read;
+  h.$.fs.read = async () => {
+    throw new Error('file busy');
+  };
+  const input = ccThingz('dev-flow:engineer');
+  assert.equal((await h.spawn(input)).sent, input);
+  h.$.fs.read = read;
+  assert.equal((await h.spawn(input)).sent.model, 'claude-opus-5-5');
+});
+
 test('off, routing off and a failing hook all spawn as Claude Code would', async () => {
   const off = await started({ subagentRouting: 'off' });
   const input = spawnInput();

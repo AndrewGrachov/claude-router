@@ -790,6 +790,21 @@ test('a classifier on this machine says so where the prompt goes', () => {
   assert.ok(lines.includes('Health      not paused · 0 recent failures'));
 });
 
+test('where the prompt goes names the host the request reaches', () => {
+  const at = (endpoint) => {
+    const ollama = { ...DEFAULTS.classifiers.ollama, endpoint };
+    const config = { ...DEFAULTS, classifier: 'ollama', classifiers: { ...DEFAULTS.classifiers, ollama } };
+    return classifierLines({}, config).find((line) => line.startsWith('Sends'));
+  };
+  assert.equal(at('http://[::1]:11434/api/chat'), 'Sends       prompt + 6 recent turns → this machine');
+  assert.equal(at('http://127.0.0.1:11434/api/chat'), 'Sends       prompt + 6 recent turns → this machine');
+  assert.equal(at('https://localhost:x@evil.example/api'), 'Sends       prompt + 6 recent turns → evil.example');
+  assert.equal(
+    at('https://localhost.evil.example/api'),
+    'Sends       prompt + 6 recent turns → localhost.evil.example',
+  );
+});
+
 test('an activity shows its cost only when every reply was priced', () => {
   const code = STATS.byActivity.code;
   for (const [name, counts, expected] of [

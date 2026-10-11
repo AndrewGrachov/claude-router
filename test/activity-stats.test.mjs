@@ -10,6 +10,7 @@ import {
   emptyStore,
   latencyP95,
   mergeMetrics,
+  mergeStores,
   metricsAfterReset,
   mostlyOn,
   OBSERVED,
@@ -18,6 +19,7 @@ import {
   recordMetrics,
   recordStore,
   recordTurn,
+  storeAfterReset,
   storeSummary,
   turnActivity,
 } from '../lib/activity-stats.mjs';
@@ -235,12 +237,15 @@ test('recordStore does not change the store it was given', () => {
 test('readStore keeps a valid store and falls back to an empty one for any bad shape', () => {
   const valid = {
     version: 1,
+    since: 7,
     confusion: { code: { code: 4, ops: 1 }, none: { talk: 2 } },
     runs: { code: [1, 0, 2, 0, 3] },
     lateral: { taken: 2, refused: 1 },
   };
   assert.deepEqual(readStore(valid), valid);
   assert.deepEqual(readStore(structuredClone(emptyStore())), emptyStore());
+  const { since: _since, ...shared } = valid;
+  assert.deepEqual(readStore(shared), { ...valid, since: null }, 'the shared key from before 1.10.3 has no since');
   const mutate = (change) => {
     const copy = structuredClone(valid);
     change(copy);
@@ -255,6 +260,7 @@ test('readStore keeps a valid store and falls back to an empty one for any bad s
     ['a future version', mutate((v) => (v.version = 2))],
     ['no version', mutate((v) => delete v.version)],
     ['an extra top-level key', mutate((v) => (v.text = 'hello'))],
+    ['a string since', mutate((v) => (v.since = '7'))],
     ['missing runs', mutate((v) => delete v.runs)],
     ['confusion as an array', mutate((v) => (v.confusion = []))],
     ['an unknown predicted row', mutate((v) => (v.confusion.guess = { code: 1 }))],
@@ -288,23 +294,59 @@ test('a store saved before 1.10.1 reads back without its shadow readout and keep
     7,
   ]) {
     const before = { ...saved, shadow };
-    assert.deepEqual(readStore(before), saved);
+    assert.deepEqual(readStore(before), { ...saved, since: null });
     assert.deepEqual(before.shadow, shadow, 'the value read is not changed');
   }
 });
 
-test('the stats store holds only version, confusion, runs and lateral, whatever the turn measured', () => {
-  const store = recordStore(emptyStore(), {
-    predicted: 'code',
-    observed: 'code',
-    runEnded: { activity: 'code', length: 2 },
-    lateral: 'taken',
-    classifier: 'jev',
-    adviceMs: 240,
-    downMove: 'moved',
-  });
-  assert.deepEqual(Object.keys(store), ['version', 'confusion', 'runs', 'lateral']);
+test('the stats store holds only version, since, confusion, runs and lateral, whatever the turn measured', () => {
+  const store = recordStore(
+    emptyStore(),
+    {
+      predicted: 'code',
+      observed: 'code',
+      runEnded: { activity: 'code', length: 2 },
+      lateral: 'taken',
+      classifier: 'jev',
+      adviceMs: 240,
+      downMove: 'moved',
+    },
+    500,
+  );
+  assert.deepEqual(Object.keys(store), ['version', 'since', 'confusion', 'runs', 'lateral']);
+  assert.equal(store.since, 500);
   assert.deepEqual(readStore(store), store);
+});
+
+test('recordStore keeps the first since and returns the store itself for a turn that counts nothing', () => {
+  const empty = emptyStore();
+  const nothing = { predicted: 'code', observed: null, runEnded: null, lateral: null };
+  assert.equal(recordStore(empty, nothing, 500), empty);
+  const once = recordStore(empty, { ...nothing, observed: 'code' }, 500);
+  assert.equal(recordStore(once, { ...nothing, lateral: 'refused' }, 900).since, 500);
+});
+
+test('mergeStores adds up every record since the last reset, the shared one from before 1.10.3 included', () => {
+  const record = (since, taken) => ({
+    version: 1,
+    since,
+    confusion: { code: { code: 1 } },
+    runs: { code: [1, 0, 0, 0, 0] },
+    lateral: { taken, refused: 0 },
+  });
+  const shared = { ...record(null, 4) };
+  delete shared.since;
+  assert.deepEqual(mergeStores([record(200, 1), record(100, 2), shared, undefined, { version: 'bad' }]), {
+    version: 1,
+    since: 100,
+    confusion: { code: { code: 3 } },
+    runs: { code: [3, 0, 0, 0, 0] },
+    lateral: { taken: 7, refused: 0 },
+  });
+  // A reset at 150 drops the record that started before it; the shared key is deleted by the reset itself.
+  assert.deepEqual(mergeStores([record(200, 1), record(100, 2)], 150), record(200, 1));
+  assert.deepEqual(storeAfterReset(record(100, 2), 150), emptyStore());
+  assert.deepEqual(storeAfterReset(record(200, 1), 150), record(200, 1));
 });
 
 test('readMetrics keeps each part it can read and drops only a bad one', () => {

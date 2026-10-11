@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -72,15 +72,48 @@ test('file conversion backs up exact bytes and never overwrites an existing back
   t.after(() => rm(directory, { recursive: true }));
   const path = join(directory, 'router.json');
   const original = JSON.stringify(old);
-  await writeFile(path, original);
+  await writeFile(path, original, { mode: 0o600 });
   const backup = await migrateFile(path);
   assert.equal(await readFile(backup, 'utf8'), original);
   assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), migrateConfig(old));
+  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  assert.deepEqual((await readdir(directory)).sort(), ['router.json', 'router.json.v0.8.backup']);
   assert.equal(await migrateFile(path), null);
   await writeFile(path, original);
-  await assert.rejects(migrateFile(path), { code: 'EEXIST' });
+  await assert.rejects(migrateFile(path), {
+    code: 'EEXIST',
+    message: `${backup} already exists: move it away, then run again`,
+  });
   assert.equal(await readFile(path, 'utf8'), original);
   assert.equal(await readFile(backup, 'utf8'), original);
+});
+
+test('a symlinked router.json is refused and left as it is', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'router-migration-'));
+  t.after(() => rm(directory, { recursive: true }));
+  const source = join(directory, 'dotfiles-router.json');
+  const path = join(directory, 'router.json');
+  await writeFile(source, JSON.stringify(old));
+  await symlink(source, path);
+  await assert.rejects(migrateFile(path), { message: `${path} is a symlink: migrate the file it points to` });
+  assert.equal(await readFile(source, 'utf8'), JSON.stringify(old));
+  assert.deepEqual((await readdir(directory)).sort(), ['dotfiles-router.json', 'router.json']);
+  // An already native file behind a symlink needs no write, so it is not refused.
+  await writeFile(source, JSON.stringify(migrateConfig(old)));
+  assert.equal(await migrateFile(path), null);
+});
+
+test('a failed write leaves router.json as it was, removes the backup and keeps a file it did not make', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'router-migration-'));
+  t.after(() => rm(directory, { recursive: true }));
+  const path = join(directory, 'router.json');
+  await writeFile(path, JSON.stringify(old));
+  // Something already in the temporary file's place makes its write fail.
+  const temp = `${path}.${process.pid}.tmp`;
+  await mkdir(temp);
+  await assert.rejects(migrateFile(path), { code: 'EEXIST' });
+  assert.equal(await readFile(path, 'utf8'), JSON.stringify(old));
+  assert.deepEqual((await readdir(directory)).sort(), ['router.json', `router.json.${process.pid}.tmp`]);
 });
 
 test('a 1.1 file moves its jev section to classifiers.jev and is backed up beside a 0.8 backup', async (t) => {

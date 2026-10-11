@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { chmod, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isGatewayLayout, loadConfig } from '../lib/config.mjs';
@@ -48,10 +48,30 @@ export async function migrateFile(path) {
   const file = JSON.parse(original);
   const next = migrateConfig(file);
   if (JSON.stringify(file) === JSON.stringify(next)) return null;
+  // Renaming over a symlink would replace the link, not the file a dotfile manager keeps: as the pane, refuse it.
+  const info = await lstat(path);
+  if (info.isSymbolicLink()) throw new Error(`${path} is a symlink: migrate the file it points to`);
   // Named for the layout it keeps, so a 1.1 migration never collides with a 0.8 backup already on disk.
   const backup = `${path}.${isGatewayLayout(file) ? 'v0.8' : 'v1.1'}.backup`;
-  await writeFile(backup, original, { flag: 'wx', mode: 0o600 });
-  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`);
+  try {
+    await writeFile(backup, original, { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if (error.code === 'EEXIST') error.message = `${backup} already exists: move it away, then run again`;
+    throw error;
+  }
+  // Written beside it and renamed over it, so a crash mid-write leaves router.json whole. A failure removes this
+  // run's backup and its temporary file, never one it did not create, so the next run starts clean.
+  const temp = `${path}.${process.pid}.tmp`;
+  let created = false;
+  try {
+    await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, { flag: 'wx' });
+    created = true;
+    await chmod(temp, info.mode & 0o777);
+    await rename(temp, path);
+  } catch (error) {
+    await Promise.all([created ? rm(temp, { force: true }) : null, rm(backup, { force: true })]);
+    throw error;
+  }
   return backup;
 }
 

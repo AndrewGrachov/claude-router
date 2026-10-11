@@ -16,7 +16,7 @@ import {
   TINY_ROUTER,
   texts,
 } from './harness.mjs';
-import { assistant, jevResponse, toolResult, user } from './helpers.mjs';
+import { assistant, jevResponse, savedCounts, savedStats, toolResult, user } from './helpers.mjs';
 
 // Your model's simulated cache: the one kept for the model /model selects.
 const yours = (h) => h.loop().yoursBy[modelAlias(DEFAULTS, h.view().nativeModel)];
@@ -31,6 +31,48 @@ test('frozen native state reads do not restore consumed pins or drop first respo
   assert.equal(h.view().actualModel, 'claude-opus-5-5');
   assert.equal(h.loop().lastRequest.tokens, 1100);
   assert.equal(h.loop().models['claude-opus-5-5'].prefixTokens, 1000);
+});
+
+test('a pinned turn interrupted before its route is written leaves the pin for the next turn', async () => {
+  const h = harness();
+  await start(h);
+  await h.event('command.run', { command: 'router', args: 'pin high' });
+  const set = h.$.state.set;
+  let release;
+  h.$.state.set = async (ref, value, options) => {
+    if (ref.key === 'loops' && !release) await new Promise((resolve) => (release = resolve));
+    return set(ref, value, options);
+  };
+  const stepping = drain(h.step(step));
+  for (let i = 0; i < 100 && !release; i += 1) await Promise.resolve();
+  h.$.state.set = set;
+  await h.event('turn.complete', { turnId: step.turnId });
+  release();
+  await stepping;
+  assert.equal(h.view().pendingPin, 'high');
+  await drain(h.step({ ...step, turnId: 't2' }));
+  assert.equal(h.requests.at(-1).model, 'claude-opus-5-5');
+  assert.equal(h.view().pendingPin, null);
+});
+
+test('a pin pressed again while a pinned turn chooses serves the next turn', async () => {
+  const h = harness();
+  await start(h);
+  await h.event('command.run', { command: 'router', args: 'pin high' });
+  const set = h.$.state.set;
+  let release;
+  h.$.state.set = async (ref, value, options) => {
+    if (ref.key === 'loops' && !release) await new Promise((resolve) => (release = resolve));
+    return set(ref, value, options);
+  };
+  const stepping = drain(h.step(step));
+  for (let i = 0; i < 100 && !release; i += 1) await Promise.resolve();
+  h.$.state.set = set;
+  await h.event('command.run', { command: 'router', args: 'pin high' });
+  release();
+  await stepping;
+  assert.equal(h.requests.at(-1).model, 'claude-opus-5-5');
+  assert.equal(h.view().pendingPin, 'high');
 });
 
 test('on a provider that gives each effort its own cache, the loop keys the observed cache by effort', async () => {
@@ -481,7 +523,7 @@ test('a 1.1 router.json makes routing unavailable and points to the migration sc
 });
 
 const LOW = { micro: 0, low: 0.95, medium: 0.05, high: 0, uncertain: 0 };
-const STATS = 'activity:stats:v1';
+const isStats = (key) => key.startsWith('activity:stats:');
 
 // One whole turn on the session's `model`: its prompt, a routed step, then turn.complete over a transcript where the
 // assistant called `tools`.
@@ -554,7 +596,7 @@ test('with activity routing on, an ops turn moves from Sonnet to Haiku inside it
     lateral: { taken: 1, refused: 0 },
     agreement: { matched: 2, total: 2 },
   });
-  assert.deepEqual(h.preferences.get(STATS), {
+  assert.deepEqual(savedCounts(h.preferences), {
     version: 1,
     confusion: { code: { code: 1 }, ops: { ops: 1 } },
     runs: { code: [1, 0, 0, 0, 0] },
@@ -572,7 +614,7 @@ test('with activity routing on, an ops turn moves from Sonnet to Haiku inside it
   assert.deepEqual(h.view().activityMetrics, metrics);
 
   await h.event('session.end', { reason: 'clear' });
-  assert.deepEqual(h.preferences.get(STATS).runs, { code: [1, 0, 0, 0, 0], ops: [1, 0, 0, 0, 0] });
+  assert.deepEqual(savedStats(h.preferences).runs, { code: [1, 0, 0, 0, 0], ops: [1, 0, 0, 0, 0] });
   h.clear('s2');
   await h.event('session.start', { cwd: '/fixture' });
   await turn(h, 't3', 'claude-sonnet-5-5', ['Bash']);
@@ -587,7 +629,7 @@ test('with activity routing on, an ops turn moves from Sonnet to Haiku inside it
   await turn(reloaded, 't1', 'claude-haiku-5-5', ['Bash']);
   assert.deepEqual(Object.keys(reloaded.view().activityStats.byActivity), ['ops']);
   assert.equal(reloaded.view().activityStats.byActivity.ops.turns, 1);
-  assert.deepEqual(reloaded.preferences.get(STATS).confusion, { code: { code: 1 }, ops: { ops: 3 } });
+  assert.deepEqual(savedStats(reloaded.preferences).confusion, { code: { code: 1 }, ops: { ops: 3 } });
 });
 
 test('a turn with activity routing off ends the watch after a cheaper activity move', async () => {
@@ -845,7 +887,7 @@ test('with activity routing on, a turn without an activity answer keeps the acti
   await turn(h, 't2', 'claude-sonnet-5-5', ['Edit']);
   assert.equal(h.loop().lastActivity, 'code');
   assert.deepEqual(h.view().activities, ['code', 'code']);
-  assert.deepEqual(h.preferences.get(STATS).runs, { code: [1, 0, 0, 0, 0] });
+  assert.deepEqual(savedStats(h.preferences).runs, { code: [1, 0, 0, 0, 0] });
 });
 
 test('the classifier latency is the wait for its answer, not the routing after it', async () => {
@@ -868,7 +910,7 @@ test('the counts across sessions reach the view and survive a restart', async ()
   await h.event('session.start', { cwd: '/fixture' });
   await turn(h, 't1', 'claude-haiku-5-5', ['Edit']);
   await turn(h, 't2', 'claude-haiku-5-5', ['Edit']);
-  assert.deepEqual(h.view().activityStore, h.preferences.get(STATS));
+  assert.deepEqual(h.view().activityStore, savedStats(h.preferences));
   await press(h, 'tab-usage');
   const lines = texts(await h.render());
   assert.ok(lines.includes('Agreement  classifier vs tools: 2 of 2 turns (100%)'));
@@ -883,19 +925,66 @@ test('the counts across sessions reach the view and survive a restart', async ()
   const reloaded = harness(JEV_KEY, h.preferences);
   await reloaded.event('session.start', { cwd: '/fixture' });
   assert.equal(reloaded.view().activityStats, null);
-  assert.deepEqual(reloaded.view().activityStore, h.preferences.get(STATS));
+  assert.deepEqual(reloaded.view().activityStore, savedStats(h.preferences));
   await press(reloaded, 'tab-classifier');
   assert.ok(texts(await reloaded.render()).includes('Labelled   2 turns'));
 });
 
+test('two sessions finishing turns at the same moment both keep their counts', async () => {
+  const preferences = new Map();
+  const a = harness(JEV_KEY, preferences);
+  const b = harness(JEV_KEY, preferences);
+  b.clear('s2');
+  for (const h of [a, b]) {
+    answering(h, jevResponse('low', LOW, 0, { code: 0.9, ops: 0.1 }));
+    await h.event('session.start', { cwd: '/fixture' });
+  }
+  await a.event('turn.start', { turnId: 't1', text: 'Next.' });
+  a.messages(async () => [user('Next.')]);
+  await drain(a.step({ ...step, turnId: 't1', model: 'claude-haiku-5-5' }));
+  a.messages(async () => [user('Next.'), assistant('done', ['Edit'])]);
+  // a reads what the store holds, then b's turn finishes before a writes.
+  const { promise: bDone, resolve } = Promise.withResolvers();
+  const get = a.$.store.get;
+  a.$.store.get = async (key) => {
+    const value = await get(key);
+    await bDone;
+    return value;
+  };
+  const completing = a.event('turn.complete', { turnId: 't1' });
+  await turn(b, 't1', 'claude-haiku-5-5', ['Edit']);
+  resolve();
+  await completing;
+  assert.deepEqual(savedStats(preferences).confusion, { code: { code: 2 } });
+});
+
+test('a Reset in another session empties the shared counts from before 1.10.3 at the next turn', async () => {
+  const shared = { version: 1, confusion: { ops: { ops: 5 } }, runs: {}, lateral: { taken: 3, refused: 0 } };
+  const preferences = new Map([['activity:stats:v1', shared]]);
+  const a = harness(JEV_KEY, preferences);
+  const b = harness(JEV_KEY, preferences);
+  b.clear('s2');
+  for (const h of [a, b]) {
+    answering(h, jevResponse('low', LOW, 0, { code: 0.9, ops: 0.1 }));
+    await h.event('session.start', { cwd: '/fixture' });
+  }
+  assert.equal(a.view().activityStore.lateral.taken, 3);
+  await press(b, 'tab-usage');
+  await press(b, 'reset-stats');
+  await turn(a, 't1', 'claude-haiku-5-5', ['Edit']);
+  assert.equal(preferences.has('activity:stats:v1'), false);
+  assert.deepEqual(a.view().activityStore.confusion, { code: { code: 1 } });
+  assert.deepEqual(a.view().activityStore, savedStats(preferences));
+});
+
 test('a corrupted or unreadable stats store shows an empty readout and never breaks the session', async () => {
   for (const [name, preferences] of [
-    ['corrupted', new Map([[STATS, { version: 1, confusion: 'text' }]])],
+    ['corrupted', new Map([['activity:stats:v1:s0', { version: 1, confusion: 'text' }]])],
     [
       'unreadable',
       {
         get: (key) => {
-          if (key === STATS) throw new Error('store down');
+          if (isStats(key)) throw new Error('store down');
         },
         set: () => {},
       },
@@ -940,11 +1029,11 @@ test('a failing stats store or transcript never breaks a turn', async () => {
   const saved = new Map();
   const store = {
     get: (key) => {
-      if (key === STATS) throw new Error('store down');
+      if (isStats(key)) throw new Error('store down');
       return saved.get(key);
     },
     set: (key, value) => {
-      if (key === STATS) throw new Error('store down');
+      if (isStats(key)) throw new Error('store down');
       return saved.set(key, value);
     },
   };
@@ -980,8 +1069,8 @@ test('a turn finishing while the session changes records nothing into the new se
   release();
   await completing;
   assert.equal(h.view().activityStats, null);
-  assert.deepEqual(h.preferences.get(STATS).confusion, { code: { code: 1 } });
-  assert.deepEqual(h.preferences.get(STATS).runs, { code: [1, 0, 0, 0, 0] });
+  assert.deepEqual(savedStats(h.preferences).confusion, { code: { code: 1 } });
+  assert.deepEqual(savedStats(h.preferences).runs, { code: [1, 0, 0, 0, 0] });
 });
 
 test('a session ending while a turn writes its stats leaves no run in the new session', async () => {
@@ -1007,7 +1096,7 @@ test('a session ending while a turn writes its stats leaves no run in the new se
   release();
   await completing;
   await h.event('session.end', { reason: 'clear' });
-  assert.deepEqual(h.preferences.get(STATS).runs, { code: [0, 1, 0, 0, 0] });
+  assert.deepEqual(savedStats(h.preferences).runs, { code: [0, 1, 0, 0, 0] });
 });
 
 test('a Sonnet session limited to Sonnet keeps its effort on a turn the code cell was not chosen for', async () => {

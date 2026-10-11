@@ -39,9 +39,12 @@ declare module 'claude-code' {
     lateral?: { taken: number; refused: number };
     agreement: { matched: number; total: number };
   }
-  // Cross-session counts under store key 'activity:stats:v1'. `runs` buckets run lengths 1, 2, 3, 4, 5+.
+  // Cross-session counts, one record per session under store key 'activity:stats:v1:<session id>', and their sum.
+  // `since` is the first count after a reset (null in the key all sessions shared before 1.10.3). `runs` buckets run
+  // lengths 1, 2, 3, 4, 5+.
   interface RouterActivityStore {
     version: 1;
+    since: number | null;
     confusion: Partial<Record<RouterActivityAnswer | 'none', Partial<Record<RouterObserved, number>>>>;
     runs: Partial<Record<RouterActivity, [number, number, number, number, number]>>;
     lateral: { taken: number; refused: number };

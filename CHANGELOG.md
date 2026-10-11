@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Activity stats kept across sessions (classifier vs tools, runs, activity moves) no longer lose counts when two sessions finish turns at the same moment, and a session that read them before **Reset stats** can no longer write them back. Each session now keeps its own `activity:stats:v1:<session id>` record, summed on read like the other counts. The single key earlier versions shared still counts until the next **Reset stats** deletes it. After running this version, 1.10.2 or earlier shows only the counts in that shared key.
+- A one-turn pin is no longer lost when the turn is interrupted before its route is set, and a pin pressed again while a pinned turn chooses its model now serves the next turn.
+- A subagent spawn keeps core's model when the router cannot read the settings, since they may limit the models through `availableModels`.
+- An agent definition file that could not be read is read again at the next spawn of its type, instead of passing that type through for the rest of the session.
+- The Now tab's **Why** line gives a sentence, not a raw key, for a turn routing did not choose, routing off, a model fallback by Claude Code, and an interrupted turn.
+- The Classifier tab names the host a request actually reaches: user info before `@` in an endpoint is not shown as the host, and an endpoint on `[::1]` shows as this machine.
+- `scripts/migrate-config.mjs` refuses to write through a symlink, writes the converted file beside `router.json` and renames it into place, and removes its backup after a failed write, so the next run starts clean.
+
 ## 1.10.2 (2026-10-11)
 
 ### Fixed

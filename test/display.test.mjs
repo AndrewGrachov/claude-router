@@ -251,6 +251,20 @@ test('Why names the cell for an activity move or a stay on an override, and keep
       'enough support for a cheaper model',
     ],
     ['before a turn', on, { tier: null, activity: null, reason: 'ready' }, 'ready for the next turn'],
+    [
+      'a turn routing did not choose',
+      on,
+      { tier: null, reason: 'manual' },
+      'routing did not choose this turn, so Claude’s model is kept',
+    ],
+    ['routing turned off', on, { tier: null, reason: 'routing off' }, 'routing is off, so Claude’s model is kept'],
+    [
+      'a fallback by Claude Code',
+      on,
+      { tier: null, reason: 'native-fallback' },
+      'Claude Code switched to another model, so the router kept it',
+    ],
+    ['an interrupted turn', on, { tier: null, reason: 'interrupted' }, 'the turn ended before a model was chosen'],
   ])
     assert.equal(whyText(config, view), expected, name);
 });
