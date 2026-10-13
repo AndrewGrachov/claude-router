@@ -20,7 +20,7 @@ In Claude Code:
 1. Run `/plugin configure router`.
 2. Enter the credentials of the classifier you use, and save them:
    - **Jev** (the default): the Jev API key from typesafe.ai.
-   - **Clef** or **Clef Flash** on Cloudflare Workers AI: the Cloudflare API token and the Cloudflare account ID. One token covers both models.
+   - **Clef**, **Clef Flash** or **Clef Omni** on Cloudflare Workers AI: the Cloudflare API token and the Cloudflare account ID. One token covers all three models.
    - **OpenAI**: an OpenAI API key. The prompt text goes to OpenAI.
    - **Ollama**: no credential. Run `ollama serve` and pull the model; the prompt text stays on this machine.
 3. To use another classifier, open the pane's **Classifier** tab and select its row. See [Choose the classifier](#choose-the-classifier).
@@ -241,15 +241,18 @@ The **Policy** tab writes each control inside the sentence it completes, and nam
 
 ## Choose the classifier
 
-Router asks one classifier per turn. Five are built in:
+Router asks one classifier per turn. Six are built in:
 
-| Classifier | Service                    | Credentials                                    | Deadline |
-| ---------- | -------------------------- | ---------------------------------------------- | -------: |
-| Jev        | typesafe.ai                | Jev API key                                    | 1,500 ms |
-| Clef       | Cloudflare Workers AI, 27B | Cloudflare API token and Cloudflare account ID | 3,000 ms |
-| Clef Flash | Cloudflare Workers AI, 9B  | Cloudflare API token and Cloudflare account ID | 3,000 ms |
-| OpenAI     | OpenAI, `gpt-6-luna`       | OpenAI API key                                 | 3,000 ms |
-| Ollama     | Local Ollama, `qwen3.5:9b` | None                                           | 5,000 ms |
+| Classifier | Service                        | Credentials                                    | Deadline |
+| ---------- | ------------------------------ | ---------------------------------------------- | -------: |
+| Jev        | typesafe.ai                    | Jev API key                                    | 1,500 ms |
+| Clef       | Cloudflare Workers AI, 27B     | Cloudflare API token and Cloudflare account ID | 3,000 ms |
+| Clef Flash | Cloudflare Workers AI, 9B      | Cloudflare API token and Cloudflare account ID | 3,000 ms |
+| Clef Omni  | Cloudflare Workers AI, 30B MoE | Cloudflare API token and Cloudflare account ID | 3,000 ms |
+| OpenAI     | OpenAI, `gpt-6-luna`           | OpenAI API key                                 | 3,000 ms |
+| Ollama     | Local Ollama, `qwen3.5:9b`     | None                                           | 5,000 ms |
+
+The three Clef models take the same request and the same Cloudflare credentials, so a switch between them changes only cost, speed and answers. Cloudflare bills input tokens only, per million: Clef Flash $0.038, Clef Omni $0.15, Clef $0.24 (list prices on 2026-10-13). A routing request is a few thousand tokens. In Cloudflare's own benchmarks no one model wins every task: Clef Omni leads on intent classification (BANKING77, CLINC150 with out-of-scope prompts), Clef on most of TypeSafe's workflow evals, and Clef Flash on tool-call tasks. Router has not measured Clef Omni on its own prompts yet. Clef Omni also reads images, audio and video; Router sends it text only.
 
 ![The Classifier tab: one row per classifier with where the prompt goes, its activity probe, its p95 wait and its status, a missing Jev API key with Set up; the active classifier's deadline against its wait, the host that receives the prompt, health and credentials; the agreement with tools across sessions; and Undo after a switch](router-pane-classifier.svg)
 
@@ -263,7 +266,7 @@ Under the rows, a block for the active classifier:
 - **Sends** names the service that receives prompt text. **Health** shows a pause, recent failures, and the last wait.
 - **Credentials**: **Edit** opens Claude Code's secure plugin configuration, where you enter them.
 
-With activity routing `on`, the activity question goes in the same request as the tier question (Ollama makes a second call), with the same text and nothing more. **Sends** names the service that receives the prompt and recent dialogue. With Clef or Clef Flash that is Cloudflare, not typesafe.ai; with OpenAI it is OpenAI; with Ollama it stays on this machine. Give the Cloudflare token Workers AI permissions only.
+With activity routing `on`, the activity question goes in the same request as the tier question (Ollama makes a second call), with the same text and nothing more. **Sends** names the service that receives the prompt and recent dialogue. With Clef, Clef Flash or Clef Omni that is Cloudflare, not typesafe.ai; with OpenAI it is OpenAI; with Ollama it stays on this machine. Give the Cloudflare token Workers AI permissions only.
 
 The routing policy thresholds were tuned against Jev's probabilities. Clef's, OpenAI's, and Ollama's probabilities have not been compared with Jev's, so the same prompt can switch tiers at a different point. Watch **Classifier support** for a few sessions before you rely on a new classifier.
 
@@ -299,7 +302,7 @@ To stop routing for a session, run `/router off`. To keep tier routing but stop 
 | Symptom                                     | Cause                                                                                                 | Fix                                                                                                                                                                          |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Status says `no API key` or `no API token`  | The active classifier's plugin option is unset or unavailable to this process.                        | Select **Set up** in the pane, or run `/plugin configure router`. Save the option and start a new turn.                                                                      |
-| Status says `no account ID`                 | Clef or Clef Flash is active without the Cloudflare account ID.                                       | Run `/plugin configure router` and save the Cloudflare account ID.                                                                                                           |
+| Status says `no account ID`                 | Clef, Clef Flash or Clef Omni is active without the Cloudflare account ID.                            | Run `/plugin configure router` and save the Cloudflare account ID.                                                                                                           |
 | Route stays on the current model            | The classifier timed out, failed, is paused, or network policy refused it.                            | Read the status band and the pane header. Network policy refusal is not bypassed.                                                                                            |
 | `/model` changed but routing stopped        | Choosing a model turns routing off.                                                                   | Run `/router auto` to turn routing back on.                                                                                                                                  |
 | Router reports invalid configuration        | `router.json` is invalid, or project/local settings redirect the router profile.                      | Inspect `router.json`, remove project/local `HOME` or `CLAUDE_CONFIG_DIR` overrides, or run the [migration command](configuration.md#convert-an-older-routerjson).           |

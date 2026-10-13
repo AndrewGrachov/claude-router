@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Clef Omni joins Clef and Clef Flash as a third Cloudflare classifier. It costs less than Clef, and in Cloudflare's benchmarks it leads the Clef family on intent classification.
+
+### Added
+
+- Clef Omni (`clef-omni`), Cloudflare's 30B mixture-of-experts model (3B active) on Workers AI, as a built-in classifier. Select its row on the Classifier tab, or set `"classifier": "clef-omni"`. It takes the same `system-one` request and the same Cloudflare API token and account ID as Clef, with a 3,000 ms deadline. Cloudflare's list price is $0.15 per million input tokens, between Clef Flash ($0.038) and Clef ($0.24); output is free.
+- The user guide compares the three Clef models on price and on Cloudflare's published benchmarks. No model wins every task.
+
+Router sends Clef Omni text only, not images, audio or video. Clef Omni has no activity probe yet, so its Classifier tab row shows no accuracy or p95 latency. Router has not measured its routing quality, and its probabilities have not been compared with Jev's.
+
 ## 1.10.5 (2026-10-11)
 
 The route now follows the task while it runs, for the tier and the activity, in both directions. Before, a turn was

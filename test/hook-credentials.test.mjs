@@ -41,19 +41,26 @@ test('each classifier reads its key option, then the environment variables named
       'plugin options',
       CLOUDFLARE_KEYS,
       {},
-      { jev: 'missing-key', clef: null, 'clef-flash': null, openai: 'missing-key', ollama: null },
+      { jev: 'missing-key', clef: null, 'clef-flash': null, 'clef-omni': null, openai: 'missing-key', ollama: null },
     ],
     [
       'environment variables',
       {},
       { TYPESAFE_API_KEY: 'k', CLOUDFLARE_API_TOKEN: 't', CLOUDFLARE_ACCOUNT_ID: 'a' },
-      { jev: null, clef: null, 'clef-flash': null, openai: 'missing-key', ollama: null },
+      { jev: null, clef: null, 'clef-flash': null, 'clef-omni': null, openai: 'missing-key', ollama: null },
     ],
     [
       'an OpenAI environment variable',
       {},
       { OPENAI_API_KEY: 'o' },
-      { jev: 'missing-key', clef: 'missing-key', 'clef-flash': 'missing-key', openai: null, ollama: null },
+      {
+        jev: 'missing-key',
+        clef: 'missing-key',
+        'clef-flash': 'missing-key',
+        'clef-omni': 'missing-key',
+        openai: null,
+        ollama: null,
+      },
     ],
     [
       'a token without an account',
@@ -63,6 +70,7 @@ test('each classifier reads its key option, then the environment variables named
         jev: 'missing-key',
         clef: 'missing-account',
         'clef-flash': 'missing-account',
+        'clef-omni': 'missing-account',
         openai: 'missing-key',
         ollama: null,
       },
@@ -95,24 +103,29 @@ test('every classifier option has both environment fallbacks', async () => {
   assert.equal(h.view().credentials.jev, 'missing-key');
 });
 
-test('Clef Flash classifies through its filled endpoint and reads the Cloudflare envelope', async () => {
-  const h = harness(CLOUDFLARE_KEYS);
-  h.files.set(CONFIG, JSON.stringify({ classifier: 'clef-flash' }));
-  const calls = [];
-  h.http(async (url, init) => {
-    calls.push({ url, init });
-    return { ok: true, status: 200, text: CLEF_FLASH_ANSWER, headers: {} };
+for (const [id, label] of [
+  ['clef-flash', 'Clef Flash'],
+  ['clef-omni', 'Clef Omni'],
+]) {
+  test(`${label} classifies through its filled endpoint and reads the Cloudflare envelope`, async () => {
+    const h = harness(CLOUDFLARE_KEYS);
+    h.files.set(CONFIG, JSON.stringify({ classifier: id }));
+    const calls = [];
+    h.http(async (url, init) => {
+      calls.push({ url, init });
+      return { ok: true, status: 200, text: CLEF_FLASH_ANSWER, headers: {} };
+    });
+    await start(h);
+    await drain(h.step(step));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, `https://api.cloudflare.com/client/v4/accounts/acct-1/ai/run/@cf/cloudflare/${id}`);
+    assert.equal(calls[0].init.headers.authorization, 'Bearer synthetic-token');
+    assert.equal(JSON.parse(calls[0].init.body).model, id);
+    assert.equal(h.view().error, null);
+    assert.equal(h.view().adviceChoice, 'micro');
+    assert.ok(texts(await h.render()).some((line) => line.startsWith(`${label} ready`)));
   });
-  await start(h);
-  await drain(h.step(step));
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://api.cloudflare.com/client/v4/accounts/acct-1/ai/run/@cf/cloudflare/clef-flash');
-  assert.equal(calls[0].init.headers.authorization, 'Bearer synthetic-token');
-  assert.equal(JSON.parse(calls[0].init.body).model, 'clef-flash');
-  assert.equal(h.view().error, null);
-  assert.equal(h.view().adviceChoice, 'micro');
-  assert.ok(texts(await h.render()).some((line) => /^Clef Flash ready/.test(line)));
-});
+}
 
 test('a missing account warns in the band and the pane and offers the key dialog', async () => {
   const h = harness({ cloudflare_api_token: 'synthetic-token' });

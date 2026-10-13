@@ -7,7 +7,7 @@ The router works with its built-in defaults. Configure the key of the active cla
 | Item                               | Where it lives                                  | How to change it                                                                                |
 | ---------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | Jev API key                        | Sensitive plugin option `typesafe_api_key`      | Run `/plugin configure router`, or use **Set up** or **Credentials → Edit** in the router pane. |
-| Cloudflare API token               | Sensitive plugin option `cloudflare_api_token`  | The same dialog. Used by Clef and Clef Flash.                                                   |
+| Cloudflare API token               | Sensitive plugin option `cloudflare_api_token`  | The same dialog. Used by Clef, Clef Flash and Clef Omni.                                        |
 | Cloudflare account ID              | Plugin option `cloudflare_account_id`           | The same dialog, or the config menu row. Not a secret.                                          |
 | OpenAI API key                     | Sensitive plugin option `openai_api_key`        | The same dialog. Used only by the OpenAI classifier. Ollama needs no key.                       |
 | Router settings and classifier     | `router.json` in the active Claude Code profile | Edit the file directly, or use the pane's Routes, Policy and Classifier tabs.                   |
@@ -125,13 +125,14 @@ Switch the mode with `/router activities off|on`, or with the **Activity routing
 
 ## Classifiers
 
-`classifier` names the active entry of `classifiers`. Each entry names its wire protocol in `api`: `system-one` for Jev, Clef and Clef Flash, `openai-decisions` for OpenAI, and `ollama` for a local Ollama server. Every protocol is converted to the same advice, so the routing policy does not change with the classifier. Unless `activityRouting` is `off`, each one is also asked for the turn's [activity](#activity-routing); the answer is optional, and a missing or malformed one keeps the activity already running. Cloudflare wraps the System One answer in `{ result, success, errors }`; Router reads both forms.
+`classifier` names the active entry of `classifiers`. Each entry names its wire protocol in `api`: `system-one` for Jev, Clef, Clef Flash and Clef Omni, `openai-decisions` for OpenAI, and `ollama` for a local Ollama server. Every protocol is converted to the same advice, so the routing policy does not change with the classifier. Unless `activityRouting` is `off`, each one is also asked for the turn's [activity](#activity-routing); the answer is optional, and a missing or malformed one keeps the activity already running. Cloudflare wraps the System One answer in `{ result, success, errors }`; Router reads both forms.
 
 | `classifier` | Endpoint                                                                                                 | Request `model` | Key option             | `timeoutMs` |
 | ------------ | -------------------------------------------------------------------------------------------------------- | --------------- | ---------------------- | ----------: |
 | `jev`        | `https://api.typesafe.ai/v1/systemone`                                                                   | `jev-1.13.0`    | `typesafe_api_key`     |      `1500` |
 | `clef`       | `https://api.cloudflare.com/client/v4/accounts/{cloudflare_account_id}/ai/run/@cf/cloudflare/clef`       | `clef`          | `cloudflare_api_token` |      `3000` |
 | `clef-flash` | `https://api.cloudflare.com/client/v4/accounts/{cloudflare_account_id}/ai/run/@cf/cloudflare/clef-flash` | `clef-flash`    | `cloudflare_api_token` |      `3000` |
+| `clef-omni`  | `https://api.cloudflare.com/client/v4/accounts/{cloudflare_account_id}/ai/run/@cf/cloudflare/clef-omni`  | `clef-omni`     | `cloudflare_api_token` |      `3000` |
 | `openai`     | `https://api.openai.com/v1/decisions`                                                                    | `gpt-6-luna`    | `openai_api_key`       |      `3000` |
 | `ollama`     | `http://127.0.0.1:11434/api/chat`                                                                        | `qwen3.5:9b`    | none                   |      `5000` |
 

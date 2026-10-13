@@ -8,7 +8,7 @@ import { isSameModel } from '../lib/route.mjs';
 import { controls, ELEMENTS, screen, texts } from './harness.mjs';
 
 const actions = new Proxy({}, { get: () => () => {} });
-const KEYS_SET = { jev: null, clef: null, 'clef-flash': null };
+const KEYS_SET = { jev: null, clef: null, 'clef-flash': null, 'clef-omni': null };
 const view = (props = {}) => ({ mode: 'auto', phase: 'routed', credentials: KEYS_SET, tab: 'now', ...props });
 const pane = (props, usage = null, paneActions = actions) =>
   renderPanel(ELEMENTS, DEFAULTS, view(props), usage, paneActions);

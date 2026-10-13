@@ -28,7 +28,7 @@ test('defaults load without a user file, with Jev as the classifier', () => {
   assert.deepEqual(config.routes.low, { model: 'haiku', effort: 'high' });
   assert.equal(config.baselineTier, 'low');
   assert.equal(config.classifier, 'jev');
-  assert.deepEqual(Object.keys(config.classifiers), ['jev', 'clef', 'clef-flash', 'openai', 'ollama']);
+  assert.deepEqual(Object.keys(config.classifiers), ['jev', 'clef', 'clef-flash', 'clef-omni', 'openai', 'ollama']);
 });
 
 test('user file overrides merge deeply and keep the rest', () => {

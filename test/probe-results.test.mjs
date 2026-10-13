@@ -96,4 +96,5 @@ test('the Classifier tab puts each probe in its classifier row', () => {
   );
   assert.ok(lines.some((line) => /^\[ ◉ Jev\s+\] api\.typesafe\.ai\s+70\/70\s+299 ms\s+○ no API key/.test(line)));
   assert.ok(lines.some((line) => /^\[ ○ Ollama\s+\] this machine\s+66\/70\s+3483 ms\s+● ready/.test(line)));
+  assert.ok(lines.some((line) => /^\[ ○ Clef Omni\s+\] api\.cloudflare\.com\s+—\s+—\s+○ no API token/.test(line)));
 });
