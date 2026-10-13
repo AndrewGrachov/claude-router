@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.0 (2026-10-13)
 
 The Usage tab now shows any period, not only this session and the time since the last reset. See [Compare routing with your model](docs/user-guide.md#compare-routing-with-your-model).
 
