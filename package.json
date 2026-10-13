@@ -1,6 +1,6 @@
 {
   "name": "@alexeiled/claude-router",
-  "version": "1.10.5",
+  "version": "1.11.0",
   "description": "Native Claude Code Mod: model and effort routing for the main conversation, advised by Jev, Clef, Clef Flash, Clef Omni, OpenAI or Ollama.",
   "license": "MIT",
   "author": "Alexei Ledenev",

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.11.0 (2026-10-13)
 
 Clef Omni joins Clef and Clef Flash as a third Cloudflare classifier. It costs less than Clef, and in Cloudflare's benchmarks it leads the Clef family on intent classification.
 
