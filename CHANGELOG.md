@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.13.0 (2026-10-13)
 
 The Now tab shows this session and today instead of the last 30 replies, a window that matched no session, hour or day. See [Open the router pane](docs/user-guide.md#open-the-router-pane).
 
