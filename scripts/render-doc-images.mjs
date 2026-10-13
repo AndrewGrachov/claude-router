@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { renderBand } from '../lib/band.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import { renderPanel, routeDraftOf } from '../lib/panel.mjs';
+import { emptyUsage, mergeUsage, recordUsage, replyEntry } from '../lib/usage.mjs';
 
 const OUT = fileURLToPath(new URL('../docs', import.meta.url));
 const config = { ...loadConfig(), nativePath: '~/.claude/router.json' };
@@ -172,15 +173,7 @@ const savings = {
   cheaperUsd: -2.31,
   strongerUsd: 0,
   switchUsd: 0.478,
-  tiers: { micro: 12, low: 26, medium: 17, high: 9 },
-  tierUsd: { micro: 0.4, low: 2.3, medium: 2.1, high: 1.6 },
   stronger: {},
-};
-// The same session against each model in router.json: /model on Sonnet or Haiku would have shown routing costing more.
-const savingsBy = {
-  opus: savings,
-  sonnet: { ...savings, yoursUsd: 4.118, cheaperUsd: 0, strongerUsd: 1.808 },
-  haiku: { ...savings, yoursUsd: 0.206, cheaperUsd: 0, strongerUsd: 5.72 },
 };
 const savingsStore = {
   version: 1,
@@ -345,57 +338,105 @@ pane(
   'router-pane-classifier.svg',
   { ...config, classifier: 'clef-flash' },
 );
-pane(
-  {
-    ...base,
-    ...yours,
-    tab: 'usage',
-    savings,
-    savingsBy,
-    savingsStore,
-    activityStats: {
-      byActivity: {
-        code: {
-          turns: 14,
-          requests: 41,
-          inputTokens: 0,
-          outputTokens: 0,
-          routedUsd: 3.12,
-          pricedRequests: 41,
-          routes: { 'claude-sonnet-5-5@high': 30, 'claude-opus-5-5@xhigh': 11 },
-        },
-        ops: {
-          turns: 6,
-          requests: 15,
-          inputTokens: 0,
-          outputTokens: 0,
-          routedUsd: 0.41,
-          pricedRequests: 15,
-          routes: { 'claude-haiku-5-5@high': 15 },
-        },
-        explore: {
-          turns: 4,
-          requests: 8,
-          inputTokens: 0,
-          outputTokens: 0,
-          routedUsd: 0.38,
-          pricedRequests: 8,
-          routes: { 'claude-haiku-5-5@high': 8 },
-        },
-      },
-      switches: { tier: 5, activity: 3 },
-      lateral: { taken: 3, refused: 1 },
-      agreement: { matched: 21, total: 24 },
-    },
-    activityStore,
-    activityMetrics: {
-      version: 1,
-      latency: { jev: [0, 0, 12, 40, 24, 3, 2, ...Array(15).fill(0)] },
-      downMoves: { moves: 7, escalations: 0 },
-    },
-  },
+// Usage records: seven days of a developer on Opus 5.5 · xhigh whose turns routing ran mostly on cheaper tiers. Per
+// reply each kind adds up: your model + cheaper + switch writes = routed.
+const NOW = new Date(2026, 9, 13, 16).getTime();
+const KINDS = {
+  code: [
+    'code',
+    'medium',
+    'claude-sonnet-5-5@high',
+    { routedUsd: 0.08, yoursUsd: 0.13, cheaperUsd: -0.052, switchUsd: 0.002 },
+  ],
+  hard: ['code', 'high', 'claude-opus-5-5@xhigh', { routedUsd: 0.13, yoursUsd: 0.13, cheaperUsd: 0, switchUsd: 0 }],
+  ops: [
+    'ops',
+    'low',
+    'claude-haiku-5-5@high',
+    { routedUsd: 0.03, yoursUsd: 0.12, cheaperUsd: -0.094, switchUsd: 0.004 },
+  ],
+  explore: [
+    'explore',
+    'low',
+    'claude-haiku-5-5@high',
+    { routedUsd: 0.028, yoursUsd: 0.11, cheaperUsd: -0.086, switchUsd: 0.004 },
+  ],
+  plan: [
+    'plan',
+    'micro',
+    'claude-haiku-5-5@low',
+    { routedUsd: 0.012, yoursUsd: 0.09, cheaperUsd: -0.08, switchUsd: 0.002 },
+  ],
+};
+const MIX = ['code', 'code', 'ops', 'explore', 'hard', 'code', 'plan', 'ops', 'code', 'explore', 'hard', 'code'];
+const TOKENS = {
+  input_tokens: 4000,
+  cache_read_input_tokens: 62_000,
+  cache_creation_input_tokens: 3000,
+  output_tokens: 900,
+};
+function usageDay(record, daysAgo, replies) {
+  let next = record;
+  for (let i = 0; i < replies; i += 3) {
+    const when = new Date(2026, 9, 13 - daysAgo, 9 + Math.floor((i / replies) * 7), (i * 7) % 60).getTime();
+    const entries = MIX.slice(i % MIX.length, (i % MIX.length) + Math.min(3, replies - i)).map((kind) => {
+      const [activity, tier, route, prices] = KINDS[kind];
+      const replies = { 'claude-haiku-5-5': 0.2, 'claude-sonnet-5-5': 0.6, 'claude-opus-5-5': 1 };
+      return replyEntry({
+        at: when,
+        activity,
+        tier,
+        route,
+        yours: 'claude-opus-5-5',
+        reply: { strongerUsd: 0, ...prices },
+        replies: Object.fromEntries(
+          Object.entries(replies).map(([model, f]) => [model, { yoursUsd: prices.yoursUsd * f }]),
+        ),
+        usage: TOKENS,
+      });
+    });
+    next = recordUsage(next, entries, {
+      now: when,
+      switched: i % 12 === 0 ? 'tier' : i % 18 === 9 ? 'activity' : null,
+    });
+  }
+  return next;
+}
+const usageSession = usageDay(emptyUsage(), 0, 24);
+const usageStore = mergeUsage([
+  usageSession,
+  [
+    [1, 30],
+    [2, 27],
+    [3, 0],
+    [4, 6],
+    [5, 33],
+    [6, 21],
+  ].reduce((record, [daysAgo, replies]) => usageDay(record, daysAgo, replies), emptyUsage()),
+]);
+function usagePane(props, title, desc, file) {
+  const view = { ...base, ...yours, tab: 'usage', usageSession, usageStore, savingsStore, ...props };
+  const tree = renderPanel(elements, config, view, usage, actions, {
+    modelOptions: Object.keys(config.models),
+    now: NOW,
+  });
+  const lines = lay(tree, { hover: false }).filter((line, i, all) => i < all.length - 1 || width(line) > 0);
+  const cols = Math.max(...lines.map(width), 70);
+  const w = Math.ceil(cols * CW + 48);
+  const h = lines.length * LH + 40;
+  const body = `<rect x="10" y="10" width="${w - 20}" height="${h - 20}" rx="6" fill="none" stroke="#3f5f8f"/>\n${runsSvg(lines, 24, 34)}`;
+  writeFileSync(`${OUT}/${file}`, svg({ title, desc, body, w, h }));
+}
+usagePane(
+  { usagePeriod: '7d', usageGroup: 'activity', usageOpen: 'activity:code' },
   'Router pane, Usage tab',
-  'The answer first, routing saved $1.84 (22%) against Opus 5.5 at xhigh; then routed replies against the same tokens on your model, this session and since the last reset, the difference split into cheaper models, stronger models and switch cache writes, the two costs as bars and the replies by tier; plan quota; this session by activity with estimated cost and route; and Claude’s readings on one line with details.',
+  'The last 7 days across sessions: the period row, routing saved against each session’s own model as a ledger (your model, cheaper models, stronger models, switch cache writes, routed), the replies and tokens, the cost by activity with coding opened to its routes and cost parts, the cost by day, what is worth a look with a link to Routes, subagents, and Delete history.',
   'router-pane-usage.svg',
+);
+usagePane(
+  { usagePeriod: 'session', usageGroup: 'tier', usageCompare: true },
+  'Router pane, Usage tab, What if',
+  'This session by tier, with What if: the same tokens on Haiku 5.5, Sonnet 5.5 and Opus 5.5 alone against what routing spent.',
+  'router-pane-usage-whatif.svg',
 );
 console.log(`wrote router-band.svg and the Now, Routes, Policy, Classifier and Usage pane pictures to ${OUT}`);

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULTS } from '../lib/config.mjs';
 import { modelAlias } from '../lib/savings.mjs';
+import { readUsage, summarize } from '../lib/usage.mjs';
 import {
   answering,
   band,
@@ -506,12 +507,16 @@ test('the router command opens the pane, switches modes and pins, with no setup 
   assert.equal(h.commandCalls(), 0);
 });
 
-test('a substituted reply is not counted as the requested tier', async () => {
+test('a substituted reply is not counted as the requested tier, and its usage is kept under the model that served it', async () => {
   const h = harness();
   await start(h);
   await h.event('command.run', { command: 'router', args: 'pin high' });
   await drain(h.step(step, substituted));
   assert.deepEqual(h.view().tiers, [null]);
+  await h.event('turn.complete', { turnId: step.turnId });
+  const cells = Object.keys(summarize(readUsage(h.preferences.get('usage:v1:s1')), { from: null, to: null }).cells);
+  assert.equal(cells.length, 1);
+  assert.match(cells[0], /^none\|none\|claude-sonnet-5-5@/);
 });
 
 test('a 1.1 router.json makes routing unavailable and points to the migration script', async () => {
@@ -1102,8 +1107,9 @@ test('the counts across sessions reach the view and survive a restart', async ()
   await turn(h, 't1', 'claude-haiku-5-5', ['Edit']);
   await turn(h, 't2', 'claude-haiku-5-5', ['Edit']);
   assert.deepEqual(h.view().activityStore, savedStats(h.preferences));
-  await press(h, 'tab-usage');
+  await press(h, 'tab-classifier');
   const lines = texts(await h.render());
+  assert.ok(lines.includes('THIS SESSION'));
   assert.ok(lines.includes('Agreement  classifier vs tools: 2 of 2 turns (100%)'));
   h.surfaces([]);
   const detail = async (r) => (await r.event('command.run', { command: 'router', args: '' })).text;
@@ -1161,7 +1167,8 @@ test('a Reset in another session empties the shared counts from before 1.10.3 at
   }
   assert.equal(a.view().activityStore.lateral.taken, 3);
   await press(b, 'tab-usage');
-  await press(b, 'reset-stats');
+  await press(b, 'delete-history');
+  await press(b, 'delete-confirm');
   await turn(a, 't1', 'claude-haiku-5-5', ['Edit']);
   assert.equal(preferences.has('activity:stats:v1'), false);
   assert.deepEqual(a.view().activityStore.confusion, { code: { code: 1 } });
@@ -1317,9 +1324,21 @@ test('with activity routing on, a continuation that falls back to the native mod
   assert.deepEqual([h.requests[1].model, h.view().tier, h.view().activity], ['claude-haiku-5-5', null, null]);
 });
 
-const SAVINGS = 'savings:v1:';
+const USAGE = 'usage:v1:';
+const LEGACY = {
+  version: 1,
+  since: 500,
+  replies: 400,
+  routedUsd: 41.18,
+  yoursUsd: 52.6,
+  cheaperUsd: -14.9,
+  strongerUsd: 0,
+  switchUsd: 3.48,
+};
+const ALL = { from: null, to: null };
+const totalOf = (value) => summarize(readUsage(value), ALL);
 
-test('a routed reply is priced against your model in the session totals and, at turn end, the store', async () => {
+test('a routed reply is priced against your model in the session totals and, at turn end, the usage record', async () => {
   // A plan subscriber's replies report plan rate limits, and Claude Code then caches the main conversation for 1h.
   for (const [rateLimits, writeMultiplier] of [
     [[], 1.25],
@@ -1337,16 +1356,24 @@ test('a routed reply is priced against your model in the session totals and, at 
     assert.equal(savings.replies, 1);
     assert.ok(Math.abs(savings.routedUsd - usd) < 1e-12);
     assert.equal(savings.yoursUsd, savings.routedUsd);
-    assert.deepEqual(savings.tiers, { low: 1 });
     // Haiku 5.5 keeps one cache across efforts, so the reply ran on your cache.
     assert.deepEqual([yours(h).total, yours(h).onYours], [1100, true]);
-    assert.equal(h.preferences.get(`${SAVINGS}s1`).replies, 1);
-    assert.ok(Number.isFinite(h.preferences.get(`${SAVINGS}s1`).since));
-    assert.deepEqual(h.view().savingsStore, h.preferences.get(`${SAVINGS}s1`));
+    const record = h.preferences.get(`${USAGE}s1`);
+    const total = totalOf(record);
+    assert.deepEqual(
+      [total.replies, total.turns, total.inputTokens, total.cacheReadTokens, total.outputTokens],
+      [1, 1, 1100, 800, 10],
+    );
+    assert.ok(Math.abs(total.routedUsd - usd) < 1e-6);
+    assert.deepEqual(Object.keys(total.cells), ['none|low|claude-haiku-5-5@high']);
+    assert.deepEqual(total.yours, { 'claude-haiku-5-5': 1 });
+    assert.ok(Number.isFinite(record.since));
+    assert.deepEqual([h.view().usageSession, h.view().usageStore], [record, record]);
+    assert.equal(h.preferences.get('savings:v1:s1'), undefined);
   }
 });
 
-test('a /model change shows the whole session against the new model; the store keeps each reply against its own', async () => {
+test('a /model change shows the whole session against the new model; the usage record keeps each reply against its own', async () => {
   const h = harness(JEV_KEY);
   answering(h, jevResponse('low', LOW));
   h.usage({ startedAt: 0, context: { tokens: 8000 }, rateLimits: [] });
@@ -1361,15 +1388,41 @@ test('a /model change shows the whole session against the new model; the store k
   h.model('claude-opus-5-5');
   await h.event('command.run', { command: 'model', origin: { kind: 'user' } });
   assert.deepEqual(h.view().savings, savingsBy.opus);
-  assert.equal(h.preferences.get(`${SAVINGS}s1`).yoursUsd, savingsBy.haiku.yoursUsd);
+  const total = totalOf(h.preferences.get(`${USAGE}s1`));
+  assert.ok(Math.abs(total.yoursUsd - savingsBy.haiku.yoursUsd) < 1e-6);
+  // What the same tokens cost on each model as yours, for What if.
+  for (const alias of ['haiku', 'sonnet', 'opus']) {
+    const id = DEFAULTS.models[alias].id;
+    assert.equal(total.whatIf[id][0], 1);
+    assert.ok(Math.abs(total.whatIf[id][1] - savingsBy[alias].yoursUsd) < 1e-6);
+  }
 });
 
-test('opening the pane while a turn writes its saved total counts the turn once', async () => {
+test('a reply is kept on the local day it arrived, and the turn and its switch on the day it ended', async (t) => {
+  const evening = new Date(2026, 9, 12, 23, 59, 59, 900).getTime();
+  t.mock.timers.enable({ apis: ['Date'], now: evening });
+  const h = harness(JEV_KEY);
+  answering(h, jevResponse('low', LOW));
+  await h.event('session.start', { cwd: '/fixture' });
+  await h.event('turn.start', { turnId: 't1', text: 'Next.' });
+  h.messages(async () => [user('Next.')]);
+  await drain(h.step({ ...step, model: 'claude-haiku-5-5' }));
+  t.mock.timers.tick(200);
+  h.messages(async () => [user('Next.'), assistant('done')]);
+  await h.event('turn.complete', { turnId: 't1' });
+  const { days } = readUsage(h.preferences.get(`${USAGE}s1`));
+  assert.deepEqual(Object.keys(days).sort(), ['2026-10-12', '2026-10-13']);
+  assert.deepEqual([Object.keys(days['2026-10-12'].cells).length, days['2026-10-12'].turns], [1, 0]);
+  assert.deepEqual(days['2026-10-12'].hours, { 23: days['2026-10-12'].cells['none|low|claude-haiku-5-5@high'][1] });
+  assert.deepEqual([Object.keys(days['2026-10-13'].cells).length, days['2026-10-13'].turns], [0, 1]);
+});
+
+test('opening the pane while a turn writes its usage counts the turn once', async () => {
   let gate = null;
   const preferences = new (class extends Map {
     set(key, value) {
       super.set(key, value);
-      if (!gate || !key.startsWith(SAVINGS)) return this;
+      if (!gate || !key.startsWith(USAGE)) return this;
       gate.reached();
       return gate.written;
     }
@@ -1388,18 +1441,18 @@ test('opening the pane while a turn writes its saved total counts the turn once'
   await h.event('command.run', { command: 'router', args: '' });
   written.resolve();
   await completing;
-  assert.equal(h.view().savingsStore.replies, 1);
+  assert.equal(totalOf(h.view().usageStore).replies, 1);
   await h.event('command.run', { command: 'router', args: '' });
-  assert.equal(h.view().savingsStore.replies, 1);
+  assert.equal(totalOf(h.view().usageStore).replies, 1);
 });
 
-test('two sessions finishing turns at the same moment both add to the totals kept across sessions', async () => {
+test('two sessions finishing turns at the same moment both add to the usage kept across sessions', async () => {
   const writes = [];
   let gated = false;
   // Each write lands only once both sessions have sent theirs.
   const preferences = new (class extends Map {
     set(key, value) {
-      if (!gated || !key.startsWith(SAVINGS)) return super.set(key, value);
+      if (!gated || !key.startsWith(USAGE)) return super.set(key, value);
       const { promise, resolve } = Promise.withResolvers();
       writes.push(() => resolve(super.set(key, value)));
       if (writes.length === 2) for (const write of writes) write();
@@ -1419,7 +1472,8 @@ test('two sessions finishing turns at the same moment both add to the totals kep
   gated = false;
   assert.equal(writes.length, 2);
   await sessions[0].event('command.run', { command: 'router', args: '' });
-  assert.equal(sessions[0].view().savingsStore.replies, 2);
+  assert.equal(totalOf(sessions[0].view().usageStore).replies, 2);
+  assert.equal(totalOf(sessions[0].view().usageSession).replies, 1);
 });
 
 test('two sessions finishing turns at the same moment both add to the metrics kept across sessions', async () => {
@@ -1459,21 +1513,21 @@ test('a Reset in one session drops what another session still holds from before 
   answering(b, jevResponse('low', LOW));
   await b.event('session.start', { cwd: '/fixture' });
   await turn(b, 't1', 'claude-haiku-5-5');
-  assert.equal(preferences.get(`${SAVINGS}s2`).replies, 1);
+  assert.equal(totalOf(preferences.get(`${USAGE}s2`)).replies, 1);
   await a.event('session.start', { cwd: '/fixture' });
   t.mock.timers.tick(1);
   await press(a, 'tab-usage');
-  await press(a, 'reset-stats');
+  await press(a, 'delete-history');
+  await press(a, 'delete-confirm');
   t.mock.timers.tick(1);
-  const before = preferences.get(`${SAVINGS}s2`);
-  assert.equal(before, undefined);
+  assert.equal(preferences.get(`${USAGE}s2`), undefined);
   await turn(b, 't2', 'claude-haiku-5-5');
-  const record = preferences.get(`${SAVINGS}s2`);
-  assert.equal(record.replies, 1);
+  const record = preferences.get(`${USAGE}s2`);
+  assert.equal(totalOf(record).replies, 1);
   assert.deepEqual([preferences.get('savings:reset:v1'), record.since], [1_001, 1_002]);
-  assert.equal(b.view().savingsStore.replies, 1);
+  assert.equal(totalOf(b.view().usageStore).replies, 1);
   await a.event('command.run', { command: 'router', args: '' });
-  assert.equal(a.view().savingsStore.replies, 1);
+  assert.equal(totalOf(a.view().usageStore).replies, 1);
 });
 
 test('a Reset in one session drops the metrics another session still holds from before it', async (t) => {
@@ -1488,7 +1542,8 @@ test('a Reset in one session drops the metrics another session still holds from 
   await a.event('session.start', { cwd: '/fixture' });
   t.mock.timers.tick(1);
   await press(a, 'tab-usage');
-  await press(a, 'reset-stats');
+  await press(a, 'delete-history');
+  await press(a, 'delete-confirm');
   assert.equal(preferences.get('activity:metrics:v1:s2'), undefined);
   t.mock.timers.tick(1);
   await turn(b, 't2', 'claude-haiku-5-5', ['Edit']);
@@ -1498,7 +1553,7 @@ test('a Reset in one session drops the metrics another session still holds from 
   assert.deepEqual(a.view().activityMetrics.latency.jev, [1, ...Array(21).fill(0)]);
 });
 
-test('a Reset in one session drops the other sessions’ totals another session read before it', async (t) => {
+test('a Reset in one session drops the other sessions’ usage another session read before it', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: 1_000 });
   const preferences = new Map();
   const [a, b] = [harness(JEV_KEY, preferences), harness(JEV_KEY, preferences)];
@@ -1508,14 +1563,127 @@ test('a Reset in one session drops the other sessions’ totals another session 
   await a.event('session.start', { cwd: '/fixture' });
   await turn(a, 't1', 'claude-haiku-5-5');
   await b.event('session.start', { cwd: '/fixture' });
-  assert.equal(b.view().savingsStore.replies, 1);
+  assert.equal(totalOf(b.view().usageStore).replies, 1);
   t.mock.timers.tick(1);
   await press(a, 'tab-usage');
-  await press(a, 'reset-stats');
+  await press(a, 'delete-history');
+  await press(a, 'delete-confirm');
   t.mock.timers.tick(1);
   await turn(b, 't1', 'claude-haiku-5-5');
-  assert.equal(b.view().savingsStore.replies, 1);
-  assert.equal(b.view().savingsStore.since, 1_002);
+  assert.equal(totalOf(b.view().usageStore).replies, 1);
+  assert.equal(b.view().usageStore.since, 1_002);
+});
+
+test('the savings totals from before the usage records are read as undated history and never written', async () => {
+  const h = harness(JEV_KEY, new Map([['savings:v1:s0', LEGACY]]));
+  answering(h, jevResponse('low', LOW));
+  await h.event('session.start', { cwd: '/fixture' });
+  await turn(h, 't1', 'claude-haiku-5-5');
+  assert.deepEqual(h.view().savingsStore, LEGACY);
+  assert.deepEqual([h.preferences.get('savings:v1:s1'), h.preferences.get('savings:v1:s0')], [undefined, LEGACY]);
+  assert.equal(totalOf(h.view().usageStore).replies, 1);
+});
+
+test('another session’s usage with no day left in the kept window is deleted when read; one that does not read stays', async (t) => {
+  const now = new Date(2026, 9, 13, 12).getTime();
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const day = {
+    cells: { 'none|low|claude-haiku-5-5@high': [1, 0.1, 0.2, -0.1, 0, 0, 10, 5, 1] },
+    whatIf: {},
+    yours: {},
+    hours: {},
+    turns: 1,
+    switches: { tier: 0, activity: 0 },
+  };
+  const old = { version: 1, since: 1, days: { '2025-01-02': day } };
+  const later = { version: 2, days: 'kept as written' };
+  const widerDay = {
+    version: 1,
+    since: 1,
+    days: { '2025-01-02': { ...day, switches: { tier: 0, activity: 0, x: 0 } } },
+  };
+  const h = harness(
+    JEV_KEY,
+    new Map([
+      [`${USAGE}s0`, old],
+      [`${USAGE}s8`, widerDay],
+      [`${USAGE}s9`, later],
+    ]),
+  );
+  await h.event('session.start', { cwd: '/fixture' });
+  assert.deepEqual(
+    [h.preferences.has(`${USAGE}s0`), h.preferences.get(`${USAGE}s8`), h.preferences.get(`${USAGE}s9`)],
+    [false, widerDay, later],
+  );
+});
+
+test('a record another session wrote again after it was read for pruning stays', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 13, 12).getTime() });
+  const day = (key) => ({
+    [key]: {
+      cells: { 'none|low|claude-haiku-5-5@high': [1, 0.1, 0.2, -0.1, 0, 0, 10, 5, 1] },
+      whatIf: {},
+      yours: {},
+      hours: {},
+      turns: 1,
+      switches: { tier: 0, activity: 0 },
+    },
+  });
+  const old = { version: 1, since: 1, days: day('2025-01-02') };
+  const fresh = { version: 1, since: 1, days: { ...day('2025-01-02'), ...day('2026-10-13') } };
+  let reads = 0;
+  const preferences = new (class extends Map {
+    get(key) {
+      // The other session writes its record between the read for pruning and the delete.
+      if (key === `${USAGE}s0` && ++reads === 2) super.set(key, fresh);
+      return super.get(key);
+    }
+  })([[`${USAGE}s0`, old]]);
+  const h = harness(JEV_KEY, preferences);
+  await h.event('session.start', { cwd: '/fixture' });
+  assert.deepEqual(preferences.get(`${USAGE}s0`), fresh);
+  assert.equal(totalOf(h.view().usageStore).replies, 2);
+});
+
+test('Delete history asks again after a tab change, and when the store refuses, this session alone starts over', async () => {
+  const h = harness(JEV_KEY);
+  answering(h, jevResponse('low', LOW));
+  await h.event('session.start', { cwd: '/fixture' });
+  await turn(h, 't1', 'claude-haiku-5-5');
+  await press(h, 'tab-usage');
+  await press(h, 'delete-history');
+  assert.equal(h.view().confirmDelete, true);
+  await press(h, 'tab-now');
+  assert.equal(h.view().confirmDelete, false);
+  await press(h, 'tab-usage');
+  const kept = h.preferences.get(`${USAGE}s1`);
+  h.$.store.keys = async () => {
+    throw new Error('store down');
+  };
+  await press(h, 'delete-history');
+  await press(h, 'delete-confirm');
+  assert.equal(h.view().notice, 'This session’s counts cleared. The saved history could not be deleted.');
+  assert.equal(totalOf(h.view().usageSession).replies, 0);
+  assert.equal(h.preferences.get(`${USAGE}s1`), kept);
+  await turn(h, 't2', 'claude-haiku-5-5');
+  assert.equal(totalOf(h.preferences.get(`${USAGE}s1`)).replies, 1);
+});
+
+test('the Usage period is kept across sessions, and a period the store cannot name opens Session', async () => {
+  const h = harness(JEV_KEY);
+  await h.event('session.start', { cwd: '/fixture' });
+  assert.equal(h.view().usagePeriod, 'session');
+  await press(h, 'tab-usage');
+  await press(h, 'period-7d');
+  assert.deepEqual([h.view().usagePeriod, h.preferences.get('usage:period')], ['7d', '7d']);
+  await h.event('session.end', { reason: 'clear' });
+  h.clear('s2');
+  await h.event('session.start', { cwd: '/fixture' });
+  assert.equal(h.view().usagePeriod, '7d');
+  h.preferences.set('usage:period', 'fortnight');
+  h.clear('s3');
+  await h.event('session.start', { cwd: '/fixture' });
+  assert.equal(h.view().usagePeriod, 'session');
 });
 
 test('with routing off a reply is not counted, and your model’s cache still follows it', async () => {
@@ -1526,7 +1694,7 @@ test('with routing off a reply is not counted, and your model’s cache still fo
   assert.equal(h.requests[0].effort, 'medium');
   assert.equal(h.view().savings, null);
   assert.deepEqual([yours(h).total, yours(h).onYours], [1100, true]);
-  assert.equal(h.preferences.get(`${SAVINGS}s1`), undefined);
+  assert.equal(h.preferences.get(`${USAGE}s1`), undefined);
   h.surfaces([]);
   const { text } = await h.event('command.run', { command: 'router', args: '' });
   assert.match(text, /^vs your model \(Haiku 5\.5 · medium\): no routed replies this session$/m);
@@ -1585,13 +1753,19 @@ test('a reply whose cache lifetime cannot be read is not counted, and your model
   assert.equal(h.view().savings.replies, 1);
 });
 
-test('a corrupted saved total never breaks a turn', async () => {
-  const h = harness(JEV_KEY, new Map([[`${SAVINGS}s1`, { version: 9, replies: 'many' }]]));
+test('a corrupted saved record never breaks a turn', async () => {
+  const h = harness(
+    JEV_KEY,
+    new Map([
+      [`${USAGE}s1`, { version: 9, days: 'many' }],
+      ['savings:v1:s0', { version: 9, replies: 'many' }],
+    ]),
+  );
   answering(h, jevResponse('low', LOW));
   await h.event('session.start', { cwd: '/fixture' });
-  assert.equal(h.view().savingsStore.replies, 0);
+  assert.deepEqual([totalOf(h.view().usageStore).replies, h.view().savingsStore.replies], [0, 0]);
   await turn(h, 't1', 'claude-haiku-5-5');
   assert.equal(h.requests.length, 1);
   assert.equal(h.view().savings.replies, 1);
-  assert.equal(h.preferences.get(`${SAVINGS}s1`).replies, 1);
+  assert.equal(totalOf(h.preferences.get(`${USAGE}s1`)).replies, 1);
 });

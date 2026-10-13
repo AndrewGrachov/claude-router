@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 672 819" role="img" aria-labelledby="title desc">
+  <title id="title">Router pane, Usage tab, What if</title>
+  <desc id="desc">This session by tier, with What if: the same tokens on Haiku 5.5, Sonnet 5.5 and Opus 5.5 alone against what routing spent.</desc>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size: 13px; }
+    .cap { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 12px; fill: #9a988f; }
+  </style>
+  <rect width="672" height="819" rx="8" fill="#1c1c1c"/>
+<rect x="10" y="10" width="652" height="799" rx="6" fill="none" stroke="#3f5f8f"/>
+<text x="24.0" y="34" fill="#5fafd7" font-weight="700" xml:space="preserve">ROUTING</text>
+<rect x="94.2" y="20" width="62.4" height="18" rx="4" fill="#87afff"/>
+<text x="94.2" y="34" fill="#0d1016" font-weight="700" xml:space="preserve">[ ◉ on ]</text>
+<rect x="164.4" y="20" width="70.2" height="18" rx="4" fill="#2e3340"/>
+<text x="164.4" y="34" fill="#d0d0d0" xml:space="preserve">[ ○ off ]</text>
+<text x="250.2" y="34" fill="#87d787" xml:space="preserve">Jev ready · 347 ms</text>
+<rect x="24.0" y="39" width="54.6" height="18" rx="4" fill="#2e3340"/>
+<text x="24.0" y="53" fill="#d0d0d0" xml:space="preserve">[ Now ]</text>
+<rect x="86.4" y="39" width="78.0" height="18" rx="4" fill="#2e3340"/>
+<text x="86.4" y="53" fill="#d0d0d0" xml:space="preserve">[ Routes ]</text>
+<rect x="172.2" y="39" width="78.0" height="18" rx="4" fill="#2e3340"/>
+<text x="172.2" y="53" fill="#d0d0d0" xml:space="preserve">[ Policy ]</text>
+<rect x="258.0" y="39" width="109.2" height="18" rx="4" fill="#2e3340"/>
+<text x="258.0" y="53" fill="#d0d0d0" xml:space="preserve">[ Classifier ]</text>
+<rect x="375.0" y="39" width="70.2" height="18" rx="4" fill="#87afff"/>
+<text x="375.0" y="53" fill="#0d1016" font-weight="700" xml:space="preserve">[ Usage ]</text>
+<rect x="453.0" y="39" width="39.0" height="18" rx="4" fill="#2e3340"/>
+<text x="453.0" y="53" fill="#d0d0d0" xml:space="preserve">[ ? ]</text>
+<rect x="24.0" y="77" width="85.8" height="18" rx="4" fill="#87afff"/>
+<text x="24.0" y="91" fill="#0d1016" font-weight="700" xml:space="preserve">[ Session ]</text>
+<rect x="117.6" y="77" width="70.2" height="18" rx="4" fill="#2e3340"/>
+<text x="117.6" y="91" fill="#d0d0d0" xml:space="preserve">[ Today ]</text>
+<rect x="195.6" y="77" width="46.8" height="18" rx="4" fill="#2e3340"/>
+<text x="195.6" y="91" fill="#d0d0d0" xml:space="preserve">[ 7d ]</text>
+<rect x="250.2" y="77" width="54.6" height="18" rx="4" fill="#2e3340"/>
+<text x="250.2" y="91" fill="#d0d0d0" xml:space="preserve">[ 30d ]</text>
+<rect x="312.6" y="77" width="70.2" height="18" rx="4" fill="#2e3340"/>
+<text x="312.6" y="91" fill="#d0d0d0" xml:space="preserve">[ Month ]</text>
+<rect x="390.6" y="77" width="54.6" height="18" rx="4" fill="#2e3340"/>
+<text x="390.6" y="91" fill="#d0d0d0" xml:space="preserve">[ All ]</text>
+<text x="453.0" y="91" fill="#7c7c7c" xml:space="preserve">  p next</text>
+<text x="24.0" y="110" fill="#7c7c7c" xml:space="preserve">this session · your model </text>
+<text x="226.8" y="110" fill="#e0708a" font-weight="700" xml:space="preserve">Opus 5.5 · xhigh</text>
+<text x="24.0" y="148" fill="#d0d0d0" xml:space="preserve">Routing saved </text>
+<text x="133.2" y="148" fill="#6fcf97" font-weight="700" xml:space="preserve">$1.34 (46%)</text>
+<text x="219.0" y="148" fill="#d0d0d0" xml:space="preserve"> vs your model</text>
+<text x="55.2" y="186" fill="#d0d0d0" xml:space="preserve">Your model</text>
+<text x="211.2" y="186" fill="#d0d0d0" xml:space="preserve">    $2.92</text>
+<text x="304.8" y="186" fill="#e0708a" font-weight="700" xml:space="preserve">Opus 5.5 · xhigh</text>
+<text x="24.0" y="205" fill="#7c7c7c" xml:space="preserve">  − </text>
+<text x="55.2" y="205" fill="#d0d0d0" xml:space="preserve">Cheaper models</text>
+<text x="211.2" y="205" fill="#6fcf97" xml:space="preserve">    $1.40</text>
+<text x="24.0" y="224" fill="#7c7c7c" xml:space="preserve">  + </text>
+<text x="55.2" y="224" fill="#d0d0d0" xml:space="preserve">Stronger models</text>
+<text x="211.2" y="224" fill="#d0d0d0" xml:space="preserve">    $0.00</text>
+<text x="24.0" y="243" fill="#7c7c7c" xml:space="preserve">  + </text>
+<text x="55.2" y="243" fill="#d0d0d0" xml:space="preserve">Switch cache writes</text>
+<text x="211.2" y="243" fill="#f0b429" xml:space="preserve">    $0.06</text>
+<text x="304.8" y="243" fill="#7c7c7c" xml:space="preserve">3 route switches · 4% of the saving</text>
+<text x="24.0" y="262" fill="#7c7c7c" xml:space="preserve">  = </text>
+<text x="55.2" y="262" fill="#d0d0d0" font-weight="700" xml:space="preserve">Routed</text>
+<text x="211.2" y="262" fill="#d0d0d0" font-weight="700" xml:space="preserve">    $1.58</text>
+<text x="304.8" y="262" fill="#5fafd7" xml:space="preserve">████████████</text>
+<text x="398.4" y="262" fill="#7c7c7c" xml:space="preserve">░░░░░░░░░░</text>
+<text x="476.4" y="262" fill="#7c7c7c" xml:space="preserve"> 54% of your model</text>
+<text x="24.0" y="300" fill="#7c7c7c" xml:space="preserve">  24 replies · 8 turns · input 1.66M · cache hit 90% · output 21.6K</text>
+<text x="24.0" y="338" fill="#5fafd7" font-weight="700" xml:space="preserve">BY  </text>
+<rect x="55.2" y="324" width="93.6" height="18" rx="4" fill="#2e3340"/>
+<text x="55.2" y="338" fill="#d0d0d0" xml:space="preserve">[ Activity ]</text>
+<rect x="156.6" y="324" width="70.2" height="18" rx="4" fill="#2e3340"/>
+<text x="156.6" y="338" fill="#d0d0d0" xml:space="preserve">[ Model ]</text>
+<rect x="234.6" y="324" width="62.4" height="18" rx="4" fill="#87afff"/>
+<text x="234.6" y="338" fill="#0d1016" font-weight="700" xml:space="preserve">[ Tier ]</text>
+<text x="304.8" y="338" fill="#7c7c7c" xml:space="preserve">  g next</text>
+<text x="24.0" y="357" fill="#7c7c7c" xml:space="preserve">                         replies      cost   vs yours   mostly on</text>
+<text x="39.6" y="376" fill="#d0d0d0" xml:space="preserve">▸</text>
+<text x="55.2" y="376" fill="#d7af5f" font-weight="700" xml:space="preserve">medium</text>
+<text x="211.2" y="376" fill="#d0d0d0" xml:space="preserve">      10     $0.80</text>
+<text x="351.6" y="376" fill="#6fcf97" xml:space="preserve">     −$0.50</text>
+<text x="437.4" y="376" fill="#7c7c7c" xml:space="preserve">   Sonnet 5.5 · high</text>
+<text x="39.6" y="395" fill="#d0d0d0" xml:space="preserve">▸</text>
+<text x="55.2" y="395" fill="#e0708a" font-weight="700" xml:space="preserve">high</text>
+<text x="211.2" y="395" fill="#d0d0d0" xml:space="preserve">       4     $0.52</text>
+<text x="351.6" y="395" fill="#d0d0d0" xml:space="preserve">      $0.00</text>
+<text x="437.4" y="395" fill="#7c7c7c" xml:space="preserve">   Opus 5.5 · xhigh</text>
+<text x="39.6" y="414" fill="#d0d0d0" xml:space="preserve">▸</text>
+<text x="55.2" y="414" fill="#5f9fe0" font-weight="700" xml:space="preserve">low</text>
+<text x="211.2" y="414" fill="#d0d0d0" xml:space="preserve">       8     $0.23</text>
+<text x="351.6" y="414" fill="#6fcf97" xml:space="preserve">     −$0.69</text>
+<text x="437.4" y="414" fill="#7c7c7c" xml:space="preserve">   Haiku 5.5 · high</text>
+<text x="39.6" y="433" fill="#d0d0d0" xml:space="preserve">▸</text>
+<text x="55.2" y="433" fill="#5fd7af" font-weight="700" xml:space="preserve">micro</text>
+<text x="211.2" y="433" fill="#d0d0d0" xml:space="preserve">       2     $0.02</text>
+<text x="351.6" y="433" fill="#6fcf97" xml:space="preserve">     −$0.16</text>
+<text x="437.4" y="433" fill="#7c7c7c" xml:space="preserve">   Haiku 5.5 · low</text>
+<text x="24.0" y="471" fill="#5fafd7" font-weight="700" xml:space="preserve">WHAT IF</text>
+<text x="78.6" y="471" fill="#7c7c7c" xml:space="preserve"> · the same tokens on one model   </text>
+<rect x="343.8" y="457" width="70.2" height="18" rx="4" fill="#2e3340"/>
+<text x="343.8" y="471" fill="#d0d0d0" xml:space="preserve">[ Trend ]</text>
+<text x="39.6" y="490" fill="#d0d0d0" xml:space="preserve">Haiku 5.5</text>
+<text x="211.2" y="490" fill="#7c7c7c" xml:space="preserve">████</text>
+<text x="382.8" y="490" fill="#d0d0d0" xml:space="preserve">    $0.58</text>
+<text x="453.0" y="490" fill="#6fcf97" xml:space="preserve">     −$2.34</text>
+<text x="39.6" y="509" fill="#d0d0d0" font-weight="700" xml:space="preserve">Routed</text>
+<text x="211.2" y="509" fill="#5fafd7" xml:space="preserve">████████████</text>
+<text x="382.8" y="509" fill="#d0d0d0" xml:space="preserve">    $1.58</text>
+<text x="39.6" y="528" fill="#d0d0d0" xml:space="preserve">Sonnet 5.5</text>
+<text x="211.2" y="528" fill="#7c7c7c" xml:space="preserve">█████████████</text>
+<text x="382.8" y="528" fill="#d0d0d0" xml:space="preserve">    $1.75</text>
+<text x="453.0" y="528" fill="#6fcf97" xml:space="preserve">     −$1.17</text>
+<text x="39.6" y="547" fill="#d0d0d0" xml:space="preserve">Opus 5.5 · yours</text>
+<text x="211.2" y="547" fill="#7c7c7c" xml:space="preserve">██████████████████████</text>
+<text x="382.8" y="547" fill="#d0d0d0" xml:space="preserve">    $2.92</text>
+<text x="453.0" y="547" fill="#7c7c7c" xml:space="preserve">          —</text>
+<text x="24.0" y="566" fill="#7c7c7c" xml:space="preserve">  same tokens and output on each model alone · answer quality not measured</text>
+<text x="24.0" y="604" fill="#5fafd7" font-weight="700" xml:space="preserve">WORTH A LOOK</text>
+<text x="117.6" y="604" fill="#7c7c7c" xml:space="preserve"> · from the numbers; answer quality is not measured</text>
+<text x="39.6" y="623" fill="#d7875f" font-style="italic" xml:space="preserve">coding</text>
+<text x="86.4" y="623" fill="#7c7c7c" xml:space="preserve"> · </text>
+<text x="109.8" y="623" fill="#d7af5f" font-weight="700" xml:space="preserve">medium</text>
+<text x="156.6" y="623" fill="#d0d0d0" xml:space="preserve"> carried 51% of the cost</text>
+<text x="343.8" y="623" fill="#7c7c7c" xml:space="preserve"> · mostly Sonnet 5.5 · high</text>
+<rect x="570.0" y="609" width="78.0" height="18" rx="4" fill="#2e3340"/>
+<text x="570.0" y="623" fill="#d0d0d0" xml:space="preserve">[ Routes ]</text>
+<text x="24.0" y="661" fill="#5fafd7" font-weight="700" xml:space="preserve">SUBAGENTS · across sessions</text>
+<text x="234.6" y="661" fill="#7c7c7c" xml:space="preserve">   subagent routing on</text>
+<text x="24.0" y="680" fill="#7c7c7c" xml:space="preserve">  no subagents yet</text>
+<text x="24.0" y="718" fill="#7c7c7c" xml:space="preserve">  API list prices · same tokens and output length · not a bill;</text>
+<text x="24.0" y="737" fill="#7c7c7c" xml:space="preserve">  on a Claude plan it stands for quota · answer quality not measured</text>
+<rect x="24.0" y="761" width="140.4" height="18" rx="4" fill="#2e3340"/>
+<text x="24.0" y="775" fill="#7c7c7c" xml:space="preserve">[ Delete history ]</text>
+<rect x="24.0" y="780" width="70.2" height="18" rx="4" fill="#2e3340"/>
+<text x="24.0" y="794" fill="#d0d0d0" xml:space="preserve">[ Close ]</text>
+</svg>

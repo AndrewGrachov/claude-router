@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+The Usage tab now shows any period, not only this session and the time since the last reset. See [Compare routing with your model](docs/user-guide.md#compare-routing-with-your-model).
+
+### Added
+
+- Periods on the Usage tab: Session, Today, 7d, 30d, Month and All. Press `p` for the next one; the choice is kept across sessions. Each session now keeps its routed usage by local calendar day in `usage:v1:<session id>`, for 400 days.
+- A ledger that adds up in whole cents: your model, minus cheaper models, plus stronger models, plus switch cache writes, equals routed. A line under it gives replies, turns, input, cache hit and output.
+- The period's cost by activity, model or tier (`g`), with each row opening to its routes or activities.
+- The cost per hour, day or week, and **What if** (`c`): the period's tokens on each model alone.
+- **Worth a look**, from 20 replies: the cell that carried most of the cost, switch writes that ate the saving, the cell that ran above your model. Each links to Routes or Policy. It never names a model to use.
+
+### Changed
+
+- **Delete history** replaces **Reset stats**. It asks once more, then deletes the usage, activity and subagent records of every session. To look at a shorter span, pick a period.
+- The plan quota leaves the pane: Claude Code shows it in `/usage`. Claude's readings and **details** move to the Now tab. The session's tool **Agreement** moves to the Classifier tab.
+- All adds the totals earlier versions kept without dates, with a note; the other periods start from the first dated day.
+
 ## 1.11.0 (2026-10-13)
 
 Clef Omni joins Clef and Clef Flash as a third Cloudflare classifier. It costs less than Clef, and in Cloudflare's benchmarks it leads the Clef family on intent classification.

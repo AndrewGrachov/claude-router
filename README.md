@@ -26,7 +26,7 @@ Jev is the default. [Configuration](docs/configuration.md#classifiers) gives the
 
 The band above the prompt shows the tier, activity, model, and reason for each turn. `/router` opens a pane to pin a tier, edit the model and effort of each tier, and tune the policy. See the [user guide](docs/user-guide.md#read-the-status-band).
 
-The router needs Claude Code 2.1.289 or newer. Savings are not measured. The pane's Usage tab estimates what routing cost against your own model for the same tokens at configured list prices; it is not a bill and does not judge answer quality. See the [evaluation](docs/evaluation.md).
+The router needs Claude Code 2.1.289 or newer. Savings are not measured. The pane's Usage tab estimates what routing cost against your own model for the same tokens at configured list prices, for this session, today, 7 or 30 days, this month or all; it is not a bill and does not judge answer quality. See the [evaluation](docs/evaluation.md).
 
 ## How it works
 

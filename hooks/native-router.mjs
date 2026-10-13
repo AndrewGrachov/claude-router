@@ -72,16 +72,14 @@ import {
 } from '../lib/route.mjs';
 import {
   addReplies,
-  addReply,
   afterReset,
   compareModels,
   emptySavingsStore,
-  emptyTotals,
   mergeSavingsStores,
   modelAlias,
   modelEntry,
+  modelSpec,
   readSavingsStore,
-  recordSavingsStore,
   SAVINGS_PREFIX,
   SAVINGS_RESET_KEY,
   sessionCacheTtl,
@@ -106,6 +104,18 @@ import {
   subagentsAfterReset,
   typeRoute,
 } from '../lib/subagents.mjs';
+import {
+  emptyUsage,
+  mergeUsage,
+  PERIOD_KEY,
+  PERIODS,
+  prunedUsage,
+  readUsage,
+  recordUsage,
+  replyEntry,
+  USAGE_PREFIX,
+  usageAfterReset,
+} from '../lib/usage.mjs';
 import { CLEARED_READINGS, continuationView, healthOf, initialView, responseMetrics } from '../lib/view.mjs';
 
 // The engine follows $ only into functions declared in this file, never across an import: every helper that takes $
@@ -121,9 +131,21 @@ const isSet = (value) => /^(1|true|yes|on)$/i.test(String(value ?? '').trim());
 
 // The counts kept across sessions: each session writes only its own record of a kind, `prefix` and its session id,
 // because $.store has no atomic update; the view's `field` shows every session's record since the last reset added
-// up. One marker, SAVINGS_RESET_KEY, resets them all. `legacy` is the key all sessions shared before 1.10.3: it counts
-// as another session's record until a reset deletes it.
+// up, and `ownField`, where a kind has one, this session's alone. One marker, SAVINGS_RESET_KEY, resets them all.
+// `legacy` is the key all sessions shared before 1.10.3: it counts as another session's record until a reset deletes
+// it. Another session's records that `prune` names are deleted when read. `savings` is no longer written: its records
+// are the undated totals from before `usage`, which the All period adds.
 const LEDGERS = {
+  usage: {
+    prefix: USAGE_PREFIX,
+    field: 'usageStore',
+    ownField: 'usageSession',
+    read: readUsage,
+    afterReset: usageAfterReset,
+    merge: mergeUsage,
+    empty: emptyUsage,
+    prune: prunedUsage,
+  },
   savings: {
     prefix: SAVINGS_PREFIX,
     field: 'savingsStore',
@@ -187,8 +209,8 @@ function createRouter(options) {
     afterDown: null,
     // Counts every switch to routing off; a turn compares it with its own start to see routing went off meanwhile.
     offSwitches: 0,
-    // Each turn's routing-vs-your-model totals until turn.complete adds them to the store.
-    turnSavings: new Map(),
+    // Each turn's routed replies (replyEntry) until turn.complete adds them to the session's usage record.
+    turnUsage: new Map(),
     // The counts kept across sessions, by LEDGERS kind: this session's record (`own`, `{ sessionId, record }`), held
     // here so a refresh never reads it back from the store while a write of it is pending, and the sum of every other
     // session's (`others`), read on refresh. The view shows their sum.
@@ -251,6 +273,12 @@ async function startView($, router, model) {
   return fresh && mode === 'manual' ? { mode, reason: NOT_A_TIER_REASON } : { mode };
 }
 
+// The Usage tab's period as last chosen in any session; Session when none was or the store cannot be read.
+async function periodOf($) {
+  const saved = await $.store.get(PERIOD_KEY).catch(() => null);
+  return PERIODS.includes(saved) ? saved : 'session';
+}
+
 async function rememberMode($, mode) {
   try {
     await $.store.set(`${MODE_PREFIX}${await $.session.id()}`, mode);
@@ -288,10 +316,36 @@ async function ownRecord($, router, kind) {
 
 // Every other session's record of `kind` since the last reset, added up and held. `keys` is one $.store.keys() listing.
 async function readOthers($, router, kind, { sessionId, resetAt, keys }) {
-  const { prefix, legacy, merge } = LEDGERS[kind];
+  const { prefix, legacy, merge, prune } = LEDGERS[kind];
   const own = `${prefix}${sessionId}`;
   const names = keys.filter((key) => (key.startsWith(prefix) && key !== own) || key === legacy);
-  const others = merge(await Promise.all(names.map((key) => $.store.get(key))), resetAt);
+  let values = await Promise.all(names.map((key) => $.store.get(key)));
+  if (prune) {
+    // An expired record holds nothing a period shows, a capped one only the oldest days; a session still running
+    // writes its own again at its next turn.
+    const gone = prune(
+      names.map((key, i) => [key, values[i]]),
+      Date.now(),
+    );
+    // Read again just before deleting: a session that wrote its record since keeps it, and it counts as written. The
+    // window between the read and the delete stays, as $.store has no conditional delete; it needs that session's write
+    // inside it. A record whose delete failed still counts.
+    const deleted = new Set();
+    // Every check settles before the merge, a failed read or delete included.
+    await Promise.allSettled(
+      [...gone].map(async (key) => {
+        const i = names.indexOf(key);
+        const current = await $.store.get(key);
+        if (JSON.stringify(current) !== JSON.stringify(values[i])) values[i] = current;
+        else {
+          await $.store.delete(key);
+          deleted.add(key);
+        }
+      }),
+    );
+    values = values.filter((_, i) => !deleted.has(names[i]));
+  }
+  const others = merge(values, resetAt);
   router.ledgers[kind] = { ...router.ledgers[kind], others, othersResetAt: resetAt ?? null };
 }
 
@@ -301,7 +355,10 @@ function ledgerView(router, kinds = LEDGER_KINDS) {
   const patch = {};
   for (const kind of kinds) {
     const { others, own } = router.ledgers[kind];
-    if (others) patch[LEDGERS[kind].field] = LEDGERS[kind].merge([others, own?.record]);
+    const { field, ownField, merge, empty } = LEDGERS[kind];
+    if (!others) continue;
+    patch[field] = merge([others, own?.record]);
+    if (ownField) patch[ownField] = own?.record ?? empty();
   }
   return patch;
 }
@@ -348,7 +405,7 @@ async function storeView($, router) {
 // A notice answers the last press in the pane, so the pane opens without one; the last write keeps its Undo in the
 // status bar.
 async function openPane($, router) {
-  await updateView($, router, { notice: null, ...(await storeView($, router)) });
+  await updateView($, router, { notice: null, confirmDelete: false, ...(await storeView($, router)) });
   await $.ui.open({ id: PANE, title: PANE_TITLE, focus: true, closeOnEscape: true });
 }
 
@@ -840,12 +897,14 @@ async function publishReply($, router, turnId, response, tier, route, routedUsd)
 // A routed reply written to the loop at `loopVersion`, then published: the view's metrics and the routing-vs-your-model
 // totals. A lost write publishes nothing.
 async function observeRouted($, router, { turnId, cfg, loop, loopVersion, request, response, nativeModel }) {
+  // When the reply arrived: the awaits below can cross midnight or the hour it is kept under.
+  const at = Date.now();
   const observed = observeResponse(cfg, loop, {
     usage: response.usage,
     requestedModel: request.model,
     effort: request.effort ?? null,
     stopReason: response.stopReason,
-    now: Date.now(),
+    now: at,
   });
   if (response.stopReason === null) observed.suspended = true;
   const compared = await compareYours($, router, loop, response, request.effort ?? null, nativeModel, cfg);
@@ -856,7 +915,20 @@ async function observeRouted($, router, { turnId, cfg, loop, loopVersion, reques
   const tier = isSameModel(request.model, response.usage?.model) ? loop.decision.tier : null;
   const route = `${request.model}@${request.effort ?? 'session'}`;
   await publishReply($, router, turnId, response, tier, route, compared?.reply?.routedUsd ?? null);
-  if (compared) await addSavings($, router, turnId, compared, tier);
+  // Kept by model id, under the model that served it: a substitute's cost is not the requested model's, and a models
+  // key can name another model later.
+  const idOf = (model) => modelSpec(cfg, model)?.id ?? model;
+  if (compared)
+    await addSavings($, router, {
+      turnId,
+      compared,
+      tier,
+      route: `${idOf(response.usage?.model ?? request.model)}@${request.effort ?? 'session'}`,
+      yours: idOf(nativeModel),
+      byId: Object.fromEntries(Object.entries(compared.replies).map(([alias, r]) => [cfg.models[alias].id, r])),
+      usage: response.usage,
+      at,
+    });
 }
 
 // The main conversation's prompt-cache lifetime by Claude Code's rule (sessionCacheTtl), or null when a reading
@@ -899,22 +971,35 @@ async function compareYours($, router, loop, response, servedEffort, nativeModel
   }
 }
 
-// A routed reply's prices added to each model's session totals in the view, and its prices against your model now to
-// the turn's totals for the store.
-async function addSavings($, router, turnId, compared, tier) {
+// A routed reply's prices added to each model's session totals in the view, and the reply, priced against your model
+// now, to the turn's replies for the usage record. `route` is the served model's `id@effort`, `yours` your model's id,
+// `byId` the reply priced against each model as yours, keyed by model id; `at` when the reply arrived (ms).
+async function addSavings($, router, { turnId, compared, tier, route, yours, byId, usage, at }) {
   try {
     const view = router.view ?? (await readView($, router));
-    if (compared.reply)
-      router.turnSavings.set(turnId, addReply(router.turnSavings.get(turnId) ?? emptyTotals(), compared.reply, tier));
-    await updateView($, router, { savingsBy: addReplies(view.savingsBy ?? {}, compared.replies, tier) });
+    if (compared.reply) {
+      const turn = router.turnActivities.get(turnId);
+      const entry = replyEntry({
+        at,
+        activity: tier ? (turn?.label ?? null) : null,
+        tier,
+        route,
+        yours,
+        reply: compared.reply,
+        replies: byId,
+        usage,
+      });
+      router.turnUsage.set(turnId, [...(router.turnUsage.get(turnId) ?? []), entry]);
+    }
+    await updateView($, router, { savingsBy: addReplies(view.savingsBy ?? {}, compared.replies) });
   } catch {}
 }
 
-// A finished turn's totals added to this session's record kept across sessions.
-async function flushSavings($, router, totals) {
+// A finished turn's replies, and the switch that started it, added to this session's usage record.
+async function flushUsage($, router, entries, switched) {
   try {
-    if (await addToLedger($, router, 'savings', (record, now) => recordSavingsStore(record, totals, now)))
-      await updateView($, router, ledgerView(router, ['savings']));
+    if (await addToLedger($, router, 'usage', (record, now) => recordUsage(record, entries, { switched, now })))
+      await updateView($, router, ledgerView(router, ['usage']));
   } catch {}
 }
 
@@ -1241,7 +1326,7 @@ function paneActions($, router, view) {
   };
   return {
     mode: (mode) => changeMode($, router, mode),
-    tab: (tab) => updateView($, router, { tab, notice: null }),
+    tab: (tab) => updateView($, router, { tab, notice: null, confirmDelete: false }),
     help: () => updateView($, router, { help: !(router.view ?? view).help }),
     pin: async (tier) => {
       await updateView($, router, { notice: await setPin($, router, tier) });
@@ -1297,6 +1382,18 @@ function paneActions($, router, view) {
     removeActivity: (activity, tier) => editCell(activity, tier, 'remove'),
     selectCell: (cell) => updateView($, router, { routeCell: cell, notice: null }),
     usageDetail: () => updateView($, router, { usageDetail: !(router.view ?? view).usageDetail }),
+    // The Usage tab's period, kept across sessions; a failed save keeps it for this session.
+    period: async (period) => {
+      if (!PERIODS.includes(period)) return;
+      await $.store.set(PERIOD_KEY, period).catch(() => {});
+      await updateView($, router, { usagePeriod: period, usageOpen: null });
+    },
+    usageGroup: (group) => updateView($, router, { usageGroup: group, usageOpen: null }),
+    usageCompare: () => updateView($, router, { usageCompare: !(router.view ?? view).usageCompare }),
+    usageOpen: (row) => updateView($, router, { usageOpen: row }),
+    // An insight's link: the Routes tab with the grid cell it names open.
+    openRoute: (cell) => updateView($, router, { tab: 'routes', routeCell: cell, notice: null }),
+    confirmDelete: (asked) => updateView($, router, { confirmDelete: asked }),
     // `/router activities <mode>`: the mode alone, saved at once like a classifier press, with Undo.
     activityRouting: (mode) => {
       const from = router.config.activityRouting;
@@ -1305,12 +1402,13 @@ function paneActions($, router, view) {
         withActivities(file, { base: { activityRouting: from }, activityRouting: mode }),
       );
     },
-    // One reset for both readouts: activity stats and routing vs your model, this session's and the saved ones.
+    // Delete history: every record kept across sessions (usage, the undated savings, activity stats and metrics,
+    // subagents) and this session's counts.
     resetStats: async () => {
       router.statsResets += 1;
       router.run = null;
       router.afterDown = null;
-      router.turnSavings.clear();
+      router.turnUsage.clear();
       for (const [id, agent] of router.agents) router.agents.set(id, flushedAgent(agent));
       // Every session's records. The marker is written first, so a session still holding its record from before the
       // reset drops it, unless that record's first count has the reset's millisecond or the clock moved back across
@@ -1327,13 +1425,21 @@ function paneActions($, router, view) {
         return true;
       };
       const cleared = await clearRecords().catch(() => false);
+      // The store kept the history: this session's records start over, and its next write replaces the stored one.
+      if (!cleared)
+        for (const kind of LEDGER_KINDS) {
+          const held = router.ledgers[kind];
+          if (held.own) held.own = { ...held.own, record: LEDGERS[kind].empty() };
+        }
       await updateView($, router, {
         activityStats: null,
         savingsBy: {},
-        ...(cleared ? ledgerView(router) : {}),
+        confirmDelete: false,
+        usageOpen: null,
+        ...ledgerView(router),
         notice: cleared
-          ? 'Stats reset: activity and routing vs your model, this session and saved.'
-          : 'This session’s stats reset. Saved stats could not be cleared.',
+          ? 'History deleted: usage, activity and subagent records of every session.'
+          : 'This session’s counts cleared. The saved history could not be deleted.',
       });
     },
     discardRouting: () => updateView($, router, { routeDraft: null, tuning: null, tuningBase: null, notice: null }),
@@ -1398,7 +1504,7 @@ async function endSession($, router) {
   router.turnActivities.clear();
   for (const review of router.reviews.values()) review.controller.abort();
   router.reviews.clear();
-  router.turnSavings.clear();
+  router.turnUsage.clear();
   const run = router.run;
   router.run = null;
   router.afterDown = null;
@@ -1419,6 +1525,8 @@ async function endSession($, router) {
     activityMetrics: router.view?.activityMetrics ?? null,
     savingsStore: router.view?.savingsStore ?? null,
     subagentStore: router.view?.subagentStore ?? null,
+    usageStore: router.view?.usageStore ?? null,
+    usagePeriod: router.view?.usagePeriod ?? 'session',
     health: healthOf(clientOf(router, router.config.classifier), router.config.classifier),
     configPath: router.config.nativePath,
     phase: router.view?.phase === 'unavailable' ? 'unavailable' : 'ready',
@@ -1465,6 +1573,7 @@ export function register(on, options) {
         routeDraft: null,
         lastWrite: null,
         bandDetail: (await $.store.get(BAND_DETAIL).catch(() => false)) === true,
+        usagePeriod: await periodOf($),
         ...(await storeView($, router)),
       });
     } catch (error) {
@@ -1612,9 +1721,9 @@ export function register(on, options) {
     if (turn?.mode === 'off') {
       if ((await $.session.id()) === turn.sessionId) router.afterDown = advanceDown(router.afterDown, turn).after;
     } else if (turn) await recordActivity($, router, turn);
-    const savings = router.turnSavings.get(e.turnId);
-    router.turnSavings.delete(e.turnId);
-    if (savings) await flushSavings($, router, savings);
+    const entries = router.turnUsage.get(e.turnId);
+    router.turnUsage.delete(e.turnId);
+    if (entries) await flushUsage($, router, entries, turn?.switched ?? null);
     return next(e);
   });
 

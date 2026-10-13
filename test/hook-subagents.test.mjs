@@ -277,7 +277,7 @@ test('a spawn of a type its parent just finished one of counts as a respawn', as
   assert.deepEqual([counts.agents, counts.respawns], [3, 1]);
 });
 
-test('an agent still running when the session ends is counted, and Reset stats clears the subagent records', async () => {
+test('an agent still running when the session ends is counted, and Delete history clears the subagent records', async () => {
   const h = await started();
   await h.spawn(spawnInput());
   await drain(h.step({ ...step, agentId: 'a1', model: 'claude-haiku-5-5' }));
@@ -288,7 +288,8 @@ test('an agent still running when the session ends is counted, and Reset stats c
   await r.spawn(spawnInput());
   await finish(r, 'a1', 'claude-haiku-5-5');
   await press(r, 'tab-usage');
-  await press(r, 'reset-stats');
+  await press(r, 'delete-history');
+  await press(r, 'delete-confirm');
   assert.equal(stored(r), undefined);
   assert.deepEqual(r.view().subagentStore.routed, { on: {} });
 });

@@ -540,32 +540,6 @@ test('the Policy tab puts each control in its sentence and names the default bes
   );
 });
 
-const STATS = {
-  byActivity: {
-    code: {
-      turns: 12,
-      requests: 71,
-      inputTokens: 0,
-      outputTokens: 0,
-      routedUsd: 4.213,
-      pricedRequests: 71,
-      routes: { 'claude-sonnet-5-5@high': 60, 'claude-opus-5-5@medium': 11 },
-    },
-    explore: {
-      turns: 5,
-      requests: 22,
-      inputTokens: 0,
-      outputTokens: 0,
-      routedUsd: 0.31,
-      pricedRequests: 22,
-      routes: { 'claude-haiku-5-5@session': 22 },
-    },
-    // Counts saved by 1.7.0: no cost or routes.
-    none: { turns: 3, requests: 3, inputTokens: 0, outputTokens: 0 },
-  },
-  switches: { tier: 4, activity: 5 },
-  agreement: { matched: 19, total: 22 },
-};
 const STORE = {
   version: 1,
   confusion: { code: { code: 10, read: 3 }, ops: { ops: 4, code: 1 }, debug: { code: 2 }, uncertain: { talk: 2 } },
@@ -577,27 +551,6 @@ const METRICS = {
   latency: { jev: [0, 0, 0, 3, 15, 1, 1, ...Array(15).fill(0)], openai: [9, ...Array(21).fill(0)] },
   downMoves: { moves: 12, escalations: 1 },
 };
-const HEAD = `${' '.repeat(26)}turns  requests  share  est. cost`;
-const SESSION_LINES = [
-  'BY ACTIVITY · this session',
-  '   activity routing on',
-  `${HEAD}   mostly on`,
-  '  ',
-  'coding',
-  '██████░░░░',
-  '     12        71    60%      $4.21   Sonnet 5.5 · high',
-  '  ',
-  'exploring',
-  '███░░░░░░░',
-  '      5        22    25%      $0.31   Haiku 5.5',
-  '  ',
-  'none',
-  '██░░░░░░░░',
-  '      3         3    15%          —   —',
-  'Switches   9 · 4 by tier · 5 by activity',
-  'Agreement  classifier vs tools: 19 of 22 turns (86%)',
-];
-const OFF_LINES = ['BY ACTIVITY · activity routing off', '  Not asked. Set activity routing to on in the Routes tab.'];
 const ACROSS = 'ACROSS SESSIONS · since the last reset';
 const ACROSS_LINES = [
   ACROSS,
@@ -608,64 +561,7 @@ const ACROSS_LINES = [
   'Activity moves  4 taken · 2 refused',
   'Escalations  after a cheaper activity move: 1 in 12 moves',
 ];
-const usageLines = (mode, props, paneActions = actions, options = {}) =>
-  texts(
-    renderPanel(
-      ELEMENTS,
-      { ...DEFAULTS, activityRouting: mode },
-      view({ tab: 'usage', activityMetrics: METRICS, ...props }),
-      null,
-      paneActions,
-      options,
-    ),
-  );
-
-test('the Usage tab shows this session by activity in each mode, and the counts across sessions are not on it', () => {
-  const ops = { ...STATS, byActivity: { ops: STATS.byActivity.code }, agreement: { matched: 0, total: 0 } };
-  for (const [name, mode, activityStats, expected] of [
-    ['off, nothing recorded', 'off', null, OFF_LINES],
-    [
-      'on, nothing yet',
-      'on',
-      null,
-      ['BY ACTIVITY · this session', '   activity routing on', '  no activity readings yet'],
-    ],
-    ['on, with data', 'on', STATS, SESSION_LINES],
-    [
-      'on, with refused activity moves',
-      'on',
-      { ...ops, lateral: { taken: 5, refused: 2 } },
-      [
-        'BY ACTIVITY · this session',
-        '   activity routing on',
-        `${HEAD}   mostly on`,
-        '  ',
-        'running',
-        '██████████',
-        '     12        71   100%      $4.21   Sonnet 5.5 · high',
-        'Switches   9 · 4 by tier · 5 by activity · 2 refused',
-      ],
-    ],
-  ]) {
-    const { calls, actions: recorded } = recording();
-    const lines = usageLines(mode, { activityStats, activityStore: STORE }, recorded);
-    const at = lines.findIndex((l) => l.startsWith('BY ACTIVITY'));
-    assert.deepEqual(
-      lines.slice(at, at + expected.length + 2),
-      [...expected, ' ', 'SUBAGENTS · across sessions'],
-      name,
-    );
-    assert.ok(!lines.includes(ACROSS), `${name}: the counts across sessions are on the Classifier tab`);
-    renderPanel(ELEMENTS, DEFAULTS, view({ tab: 'usage' }), null, recorded);
-    const tree = renderPanel(ELEMENTS, DEFAULTS, view({ tab: 'usage' }), null, recorded);
-    controls(tree)
-      .find((c) => c.key === 'reset-stats')
-      .onPress();
-    assert.deepEqual(calls, [['resetStats']], `${name}: the stored counts can always be reset`);
-  }
-});
-
-test('the Usage tab folds Claude’s readings to one line, and details show them with the trend and the estimates', () => {
+test('the Now tab keeps Claude’s readings on one line, and details show them with the trend and the estimates', () => {
   const comparison = { incumbent: 'low', candidate: 'high', minUsd: -0.0123, maxUsd: 0.5, paybackTurns: 3 };
   const props = {
     comparison,
@@ -675,11 +571,11 @@ test('the Usage tab folds Claude’s readings to one line, and details show them
     inputTokens: 1000,
   };
   const usage = { context: { tokens: 400_000 }, cost: { usd: 18.003 } };
-  const folded = screen(renderPanel(ELEMENTS, DEFAULTS, view({ tab: 'usage', ...props }), usage, actions));
-  assert.ok(folded.includes('CLAUDE READINGS  cost $18.003 · context 40% · cache 90%  [ details ]'));
+  const folded = screen(renderPanel(ELEMENTS, DEFAULTS, view({ tab: 'now', ...props }), usage, actions));
+  assert.ok(folded.includes('Cache    90% reused on the last reply  ·  cost $18.003 by Claude  [ details ]'));
   assert.ok(!folded.some((line) => line.startsWith('Compared tiers') || line.startsWith('INPUT PER REPLY')));
   const { calls, actions: recorded } = recording();
-  const tree = renderPanel(ELEMENTS, DEFAULTS, view({ tab: 'usage', usageDetail: true, ...props }), usage, recorded);
+  const tree = renderPanel(ELEMENTS, DEFAULTS, view({ tab: 'now', usageDetail: true, ...props }), usage, recorded);
   const lines = texts(tree);
   const at = lines.indexOf('Compared tiers        low → high');
   assert.deepEqual(lines.slice(at, at + 3), [
@@ -705,23 +601,12 @@ test('the Usage tab folds Claude’s readings to one line, and details show them
       ['  1.0K … 5.0K', null],
     ],
   );
-  const empty = screen(renderPanel(ELEMENTS, DEFAULTS, view({ tab: 'usage' }), null, actions));
-  assert.ok(empty.includes('CLAUDE READINGS  cost not reported · context — · cache —  [ details ]'));
 });
 
-test('the Usage tab puts plan quota under routing vs your model', () => {
-  const usage = {
-    rateLimits: [
-      { kind: 'five_hour', percentUsed: 48 },
-      { kind: 'seven_day', percentUsed: null },
-    ],
-  };
+test('the Usage tab shows no plan quota and no Claude readings: the status line and the Now tab have them', () => {
+  const usage = { rateLimits: [{ kind: 'five_hour', percentUsed: 48 }], cost: { usd: 18.003 } };
   const lines = screen(renderPanel(ELEMENTS, DEFAULTS, view({ tab: 'usage' }), usage, actions));
-  const at = lines.indexOf('PLAN QUOTA');
-  assert.ok(at > lines.findIndex((line) => line.startsWith('ROUTING VS YOUR MODEL')));
-  assert.equal(lines[at + 1], 'five hour  ████████░░░░░░░░  48%  used');
-  assert.ok(!lines.some((line) => line.startsWith('seven day')));
-  assert.ok(!screen(renderPanel(ELEMENTS, DEFAULTS, view({ tab: 'usage' }), null, actions)).includes('PLAN QUOTA'));
+  assert.ok(!lines.some((line) => /PLAN QUOTA|five hour|CLAUDE READINGS|\$18\.003/.test(line)));
 });
 
 const classifierLines = (props, config = { ...DEFAULTS, activityRouting: 'on' }) =>
@@ -805,31 +690,14 @@ test('where the prompt goes names the host the request reaches', () => {
   );
 });
 
-test('an activity shows its cost only when every reply was priced', () => {
-  const code = STATS.byActivity.code;
-  for (const [name, counts, expected] of [
-    ['all priced', code, '     12        71   100%      $4.21   Sonnet 5.5 · high'],
-    ['one reply unpriced', { ...code, pricedRequests: 70 }, '     12        71   100%          —   Sonnet 5.5 · high'],
-    [
-      'a 1.7.0 row priced after an upgrade',
-      { ...code, routedUsd: 0.05, pricedRequests: undefined },
-      '     12        71   100%          —   Sonnet 5.5 · high',
-    ],
-  ]) {
-    const lines = usageLines('on', { activityStats: { ...STATS, byActivity: { code: counts } } });
-    assert.equal(lines[lines.indexOf('coding') + 2], expected, name);
-  }
-});
-
-test('a narrow Usage tab drops mostly on, then the cost, before the activity counts', () => {
-  for (const [columns, header] of [
-    [null, `${HEAD}   mostly on`],
-    [79, `${HEAD}   mostly on`],
-    [78, HEAD],
-    [59, HEAD],
-    [58, `${' '.repeat(26)}turns  requests  share`],
-  ]) {
-    const lines = usageLines('on', { activityStats: STATS }, actions, { columns });
-    assert.equal(lines[lines.indexOf('   activity routing on') + 1], header, String(columns));
-  }
+test('the Classifier tab says this session’s tool agreement once a turn was labelled', () => {
+  const stats = (matched, total) => ({
+    byActivity: {},
+    switches: { tier: 0, activity: 0 },
+    agreement: { matched, total },
+  });
+  const lines = classifierLines({ activityStats: stats(19, 22) });
+  const at = lines.indexOf('THIS SESSION');
+  assert.equal(lines[at + 1], 'Agreement  classifier vs tools: 19 of 22 turns (86%)');
+  assert.ok(!classifierLines({ activityStats: stats(0, 0) }).includes('THIS SESSION'));
 });

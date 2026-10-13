@@ -104,15 +104,12 @@ declare module 'claude-code' {
     strongerUsd: number;
     switchUsd: number;
   }
-  // A session's totals; per tier ('none': not chosen by routing) its replies and their routed cost, and replies by the
-  // stronger model they ran on.
+  // A session's totals, and replies by the stronger model they ran on.
   interface RouterSavingsSession extends RouterSavingsSums {
-    tiers: Partial<Record<RouterTier | 'none', number>>;
-    tierUsd: Partial<Record<RouterTier | 'none', number>>;
     stronger: Record<string, number>;
   }
-  // Totals kept across sessions, one per session under store key 'savings:v1:<session id>' or their sum in the view,
-  // since the first reply after the last reset (ms).
+  // Totals one session kept under store key 'savings:v1:<session id>' before the usage records, or their sum in the
+  // view: no longer written, added to the Usage tab's All period as undated history.
   interface RouterSavingsStore extends RouterSavingsSums {
     version: 1;
     since: number | null;
@@ -145,6 +142,26 @@ declare module 'claude-code' {
     routed: { on: Record<string, RouterSubagentCounts> };
     passed: Partial<Record<'fork' | 'explicit' | 'teammate' | 'workflow' | 'unlisted', RouterSubagentPassed>>;
   }
+  // One local calendar day of routed replies (lib/usage.mjs). `cells` by 'activity|tier|modelId@effort' hold, in order,
+  // replies, routedUsd, yoursUsd, cheaperUsd, strongerUsd, switchUsd, inputTokens, cacheReadTokens, outputTokens.
+  // `whatIf` is [replies, USD] of the same tokens on each model id as yours; `yours` replies by your model's id;
+  // `hours` routed USD by local hour; `turns` and `switches` count turns on the day they ended.
+  interface RouterUsageDay {
+    cells: Record<string, number[]>;
+    whatIf: Record<string, [number, number]>;
+    yours: Record<string, number>;
+    hours: Record<string, number>;
+    turns: number;
+    switches: { tier: number; activity: number };
+  }
+  // Kept across sessions, one per session under store key 'usage:v1:<session id>' or their sum in the view, by day
+  // ('2026-10-13'), since its first turn written after the last reset (ms).
+  interface RouterUsageStore {
+    version: 1;
+    since: number | null;
+    days: Record<string, RouterUsageDay>;
+  }
+  type RouterUsagePeriod = 'session' | 'today' | '7d' | '30d' | 'month' | 'all';
   interface RouterView {
     phase: 'ready' | 'choosing' | 'routed' | 'manual' | 'unavailable';
     mode: 'auto' | 'manual';
@@ -190,6 +207,16 @@ declare module 'claude-code' {
     savings?: RouterSavingsSession | null;
     savingsStore?: RouterSavingsStore | null;
     subagentStore?: RouterSubagentStore | null;
+    // Every session's usage records as last read or written, and this session's own.
+    usageStore?: RouterUsageStore | null;
+    usageSession?: RouterUsageStore | null;
+    // The Usage tab: its period (kept across sessions under store key 'usage:period'), breakdown, What if, the open
+    // row ('<group>:<name>'), and whether Delete history waits for its confirmation.
+    usagePeriod?: RouterUsagePeriod;
+    usageGroup?: 'activity' | 'model' | 'tier';
+    usageCompare?: boolean;
+    usageOpen?: string | null;
+    confirmDelete?: boolean;
     configPath?: string | null;
     tuning?: Partial<RouterTuning> | null;
     tuningBase?: RouterTuning | null;
@@ -199,7 +226,7 @@ declare module 'claude-code' {
     tab?: 'now' | 'routes' | 'policy' | 'classifier' | 'usage';
     // The Routes grid cell whose editor is open: '<activity>.<tier>', or 'tier.<tier>' for a tier's own route.
     routeCell?: string | null;
-    // Whether the Usage tab shows Claude's readings in detail, with the estimates.
+    // Whether the Now tab shows Claude's readings in detail, with the estimates.
     usageDetail?: boolean;
     help?: boolean;
     bandDetail?: boolean;

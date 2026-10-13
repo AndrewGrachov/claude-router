@@ -223,7 +223,7 @@ label was right, not the classifier's probabilities.
 
 ## What the estimates mean
 
-**In the pane.** The band, the Now tab and the Usage tab report Claude's own readings: cost, context, and cache. The
+**In the pane.** The band and the Now tab report Claude's own readings: cost, context, and cache. The
 dollar figures next to them, such as the switch cost, and the payback, are estimates
 at the list prices in `router.json`. They are not your bill: a plan does not charge list prices. They are not measured
 savings: the router does not know what another model would have answered, or how many requests it would have needed.
@@ -246,8 +246,8 @@ Limits:
 
 - The answer quality of routed sessions.
 - How well the classifier labels real turns. On 70 synthetic prompts, Jev and OpenAI labelled all 70 right; see
-  [Evaluation](evaluation.md#activity-probe-set). The **Agreement** lines, on the Usage tab for this session and on the
-  Classifier tab across sessions, check your own turns against the tools they used.
+  [Evaluation](evaluation.md#activity-probe-set). The **Agreement** lines, on the
+  Classifier tab for this session and across sessions, check your own turns against the tools they used.
 - Whether an effort change on the same model keeps the cache. We found only 6 cases. Claude Code's prompt-caching
   docs say it does on the 5.5 models and Fable 5.1 with an API key or a subscription, and the router now prices it so.
 - How many requests a turn needs on each model.

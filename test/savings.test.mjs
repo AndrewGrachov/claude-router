@@ -14,7 +14,6 @@ import {
   modelSpec,
   readout,
   readSavingsStore,
-  recordSavingsStore,
   requestUsd,
   sessionCacheTtl,
 } from '../lib/savings.mjs';
@@ -33,18 +32,18 @@ const usage = ({ input = 2, read = 0, write = 0, output = 500 } = {}) => ({
   output_tokens: output,
 });
 
-// Replies in order: `[route, counts, minutesAfterTheLast, tier]`. Returns the totals and every reply.
+// Replies in order: `[route, counts, minutesAfterTheLast]`. Returns the totals and every reply.
 function session(yours, replies, { ttl = '5m', config = DEFAULTS, state = null } = {}) {
   let totals = emptyTotals();
   let cache = state;
   let at = 0;
   const each = [];
-  for (const [served, counts, minutes = 1, tier = null] of replies) {
+  for (const [served, counts, minutes = 1] of replies) {
     at += minutes * MINUTE;
     const { state: next, reply } = compareReply(config, cache, { usage: usage(counts), served, yours, ttl, now: at });
     cache = next;
     each.push(reply);
-    if (reply) totals = addReply(totals, reply, tier);
+    if (reply) totals = addReply(totals, reply);
   }
   return { totals, replies: each, state: cache };
 }
@@ -297,14 +296,6 @@ test('the cache lifetime follows Claude Code: forced 5m, then the env, the setti
     assert.equal(sessionCacheTtl({ ...none, ...overrides }), expected, JSON.stringify(overrides));
 });
 
-test('totals count replies per tier with their routed cost', () => {
-  const reply = { routedUsd: 1, yoursUsd: 2, cheaperUsd: -1.5, strongerUsd: 0, switchUsd: 0.5, strongerModel: null };
-  const totals = [['low'], ['low'], [null]].reduce((t, [tier]) => addReply(t, reply, tier), emptyTotals());
-  assert.deepEqual(totals.tiers, { low: 2, none: 1 });
-  assert.deepEqual(totals.tierUsd, { low: 2, none: 1 });
-  assert.equal(totals.yoursUsd, 6);
-});
-
 test('the readout rounds to cents so the shown parts add up to the shown difference', () => {
   const totals = {
     ...emptyTotals(),
@@ -342,7 +333,7 @@ test('rounding never flips a part’s sign or shows a part the session did not h
   }
 });
 
-test('a missing or corrupted store reads as empty, and a turn adds to it from its first reply', () => {
+test('a missing or corrupted savings store reads as empty, and a whole one as written', () => {
   for (const value of [
     undefined,
     null,
@@ -353,16 +344,8 @@ test('a missing or corrupted store reads as empty, and a turn adds to it from it
     { ...emptySavingsStore(), x: 1 },
   ])
     assert.deepEqual(readSavingsStore(value), emptySavingsStore());
-  const turn = addReply(
-    emptyTotals(),
-    { routedUsd: 1, yoursUsd: 3, cheaperUsd: -2, strongerUsd: 0, switchUsd: 0 },
-    'low',
-  );
-  const once = recordSavingsStore(readSavingsStore(undefined), turn, 5);
-  assert.deepEqual(once, { ...emptySavingsStore(), since: 5, replies: 1, routedUsd: 1, yoursUsd: 3, cheaperUsd: -2 });
-  assert.deepEqual(readSavingsStore(once), once);
-  assert.equal(recordSavingsStore(once, turn, 9).since, 5);
-  assert.equal(recordSavingsStore(once, emptyTotals(), 9), once);
+  const kept = { ...emptySavingsStore(), since: 5, replies: 1, routedUsd: 1, yoursUsd: 3, cheaperUsd: -2 };
+  assert.deepEqual(readSavingsStore(kept), kept);
 });
 
 test('the totals kept across sessions add up every session’s record since the earliest, skipping a corrupted one', () => {
@@ -384,7 +367,7 @@ test('the totals kept across sessions add up every session’s record since the 
 
 test('a model named after an Object method keeps its own session totals and every other model’s', () => {
   const reply = { routedUsd: 1, yoursUsd: 2, cheaperUsd: -1, strongerUsd: 0, switchUsd: 0, strongerModel: null };
-  const byModel = addReplies({}, { toString: reply, opus: reply }, 'low');
+  const byModel = addReplies({}, { toString: reply, opus: reply });
   assert.deepEqual(
     [byModel.toString.replies, byModel.opus.replies, Object.keys(byModel)],
     [1, 1, ['toString', 'opus']],
