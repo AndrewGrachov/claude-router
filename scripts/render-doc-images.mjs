@@ -6,8 +6,10 @@ import { renderBand } from '../lib/band.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import { renderPanel, routeDraftOf } from '../lib/panel.mjs';
 import { emptyUsage, mergeUsage, recordUsage, replyEntry } from '../lib/usage.mjs';
+import { addToStrip, switchView } from '../lib/view.mjs';
 
 const OUT = fileURLToPath(new URL('../docs', import.meta.url));
+const NOW = new Date(2026, 9, 13, 16).getTime();
 const config = { ...loadConfig(), nativePath: '~/.claude/router.json' };
 const element = (type) => (props) => ({ type, props });
 const elements = { Box: element('Box'), Text: element('Text'), Button: element('Button'), Select: element('Select') };
@@ -132,17 +134,6 @@ const base = {
     392_000, 395_000, 396_000, 398_000, 399_000, 401_000, 402_400,
   ],
   tiers: [...'llllllddllllhhhhhhhh'].map((c) => ({ l: 'low', d: 'medium', h: 'high' })[c]),
-  activities: [...'eeccoocceeppcccccccc'].map((c) => ({ c: 'code', e: 'explore', o: 'ops', p: 'plan' })[c]),
-  // What served each reply: Haiku at low, Sonnet for low coding and planning, Opus at medium and high.
-  routes: [...'hhsshhsshhoossOOOOOO'].map(
-    (c) =>
-      ({
-        h: 'claude-haiku-5-5@high',
-        s: 'claude-sonnet-5-5@high',
-        o: 'claude-opus-5-5@medium',
-        O: 'claude-opus-5-5@xhigh',
-      })[c],
-  ),
   activity: 'code',
   activityChoice: 'code',
   activityProbabilities: { code: 0.84, debug: 0.08, plan: 0.05, uncertain: 0.03 },
@@ -284,7 +275,10 @@ const activityStore = {
   lateral: { taken: 9, refused: 4 },
 };
 function pane(view, title, desc, file, paneConfig = config) {
-  const tree = renderPanel(elements, paneConfig, view, usage, actions, { modelOptions: Object.keys(config.models) });
+  const tree = renderPanel(elements, paneConfig, view, usage, actions, {
+    modelOptions: Object.keys(config.models),
+    now: NOW,
+  });
   const lines = lay(tree, { hover: false }).filter((line, i, all) => i < all.length - 1 || width(line) > 0);
   const cols = Math.max(...lines.map(width), 70);
   const w = Math.ceil(cols * CW + 48);
@@ -292,12 +286,6 @@ function pane(view, title, desc, file, paneConfig = config) {
   const body = `<rect x="10" y="10" width="${w - 20}" height="${h - 20}" rx="6" fill="none" stroke="#3f5f8f"/>\n${runsSvg(lines, 24, 34)}`;
   writeFileSync(`${OUT}/${file}`, svg({ title, desc, body, w, h }));
 }
-pane(
-  base,
-  'Router pane, Now tab',
-  'What runs next turn: tier, model and activity, with the reason and the classifier support it weighed; classifier support per tier with pin buttons; the last 20 replies colored by tier with the switch count and the replies per tier and per activity; and context, cache and cost.',
-  'router-pane-now.svg',
-);
 const draft = {
   ...routeDraftOf(config, {}),
   routes: { ...config.routes, medium: { model: 'sonnet', effort: 'xhigh' } },
@@ -340,7 +328,6 @@ pane(
 );
 // Usage records: seven days of a developer on Opus 5.5 · xhigh whose turns routing ran mostly on cheaper tiers. Per
 // reply each kind adds up: your model + cheaper + switch writes = routed.
-const NOW = new Date(2026, 9, 13, 16).getTime();
 const KINDS = {
   code: [
     'code',
@@ -375,26 +362,29 @@ const TOKENS = {
   cache_creation_input_tokens: 3000,
   output_tokens: 900,
 };
+function kindEntry(kind, when) {
+  const [activity, tier, route, prices] = KINDS[kind];
+  const replies = { 'claude-haiku-5-5': 0.2, 'claude-sonnet-5-5': 0.6, 'claude-opus-5-5': 1 };
+  return replyEntry({
+    at: when,
+    activity,
+    tier,
+    route,
+    yours: 'claude-opus-5-5',
+    reply: { strongerUsd: 0, ...prices },
+    replies: Object.fromEntries(
+      Object.entries(replies).map(([model, f]) => [model, { yoursUsd: prices.yoursUsd * f }]),
+    ),
+    usage: TOKENS,
+  });
+}
 function usageDay(record, daysAgo, replies) {
   let next = record;
   for (let i = 0; i < replies; i += 3) {
     const when = new Date(2026, 9, 13 - daysAgo, 9 + Math.floor((i / replies) * 7), (i * 7) % 60).getTime();
-    const entries = MIX.slice(i % MIX.length, (i % MIX.length) + Math.min(3, replies - i)).map((kind) => {
-      const [activity, tier, route, prices] = KINDS[kind];
-      const replies = { 'claude-haiku-5-5': 0.2, 'claude-sonnet-5-5': 0.6, 'claude-opus-5-5': 1 };
-      return replyEntry({
-        at: when,
-        activity,
-        tier,
-        route,
-        yours: 'claude-opus-5-5',
-        reply: { strongerUsd: 0, ...prices },
-        replies: Object.fromEntries(
-          Object.entries(replies).map(([model, f]) => [model, { yoursUsd: prices.yoursUsd * f }]),
-        ),
-        usage: TOKENS,
-      });
-    });
+    const entries = MIX.slice(i % MIX.length, (i % MIX.length) + Math.min(3, replies - i)).map((kind) =>
+      kindEntry(kind, when),
+    );
     next = recordUsage(next, entries, {
       now: when,
       switched: i % 12 === 0 ? 'tier' : i % 18 === 9 ? 'activity' : null,
@@ -402,10 +392,47 @@ function usageDay(record, daysAgo, replies) {
   }
   return next;
 }
-const usageSession = usageDay(emptyUsage(), 0, 24);
+// This session, 14:18 to 16:00: 86 replies in runs of one kind, a route switch where the tier changes.
+const SESSION_RUNS = [
+  ['explore', 6],
+  ['code', 2],
+  ['ops', 10],
+  ['hard', 8],
+  ['explore', 9],
+  ['hard', 7],
+  ['code', 6],
+  ['ops', 16],
+  ['code', 4],
+  ['hard', 18],
+];
+const sessionKinds = SESSION_RUNS.flatMap(([kind, n]) => Array(n).fill(kind));
+const SESSION_START = new Date(2026, 9, 13, 14, 18).getTime();
+const replyAt = (i) => SESSION_START + Math.round((i * 102 * 60_000) / sessionKinds.length);
+const tierOf = (kind) => KINDS[kind][1];
+const usageSession = sessionKinds.reduce(
+  (record, kind, i) =>
+    recordUsage(record, [kindEntry(kind, replyAt(i))], {
+      now: replyAt(i),
+      switched: i && tierOf(kind) !== tierOf(sessionKinds[i - 1]) ? 'tier' : null,
+    }),
+  emptyUsage(),
+);
+const strip = sessionKinds.reduce((built, kind) => addToStrip(built, tierOf(kind)), null);
+const last = sessionKinds.findLastIndex((kind, i) => i && tierOf(kind) !== tierOf(sessionKinds[i - 1]));
+const routeOfKind = (kind) => {
+  const [model, effort] = KINDS[kind][2].split('@');
+  return { tier: tierOf(kind), model, effort };
+};
+const { lastSwitch } = switchView(
+  routeOfKind(sessionKinds[last - 1]),
+  routeOfKind(sessionKinds[last]),
+  'code',
+  replyAt(last),
+);
 const usageStore = mergeUsage([
   usageSession,
   [
+    [0, 18],
     [1, 30],
     [2, 27],
     [3, 0],
@@ -427,6 +454,12 @@ function usagePane(props, title, desc, file) {
   const body = `<rect x="10" y="10" width="${w - 20}" height="${h - 20}" rx="6" fill="none" stroke="#3f5f8f"/>\n${runsSvg(lines, 24, 34)}`;
   writeFileSync(`${OUT}/${file}`, svg({ title, desc, body, w, h }));
 }
+pane(
+  { ...base, ...yours, usageSession, usageStore, strip, lastSwitch },
+  'Router pane, Now tab',
+  'What runs next turn: tier, model and activity, with the reason and the classifier support it weighed; one pin button per tier with its support; this session since its first reply, as a strip of every reply colored by tier, with the replies per tier and per activity, the last route switch and what routing saved against your model; today across sessions; today’s first finding worth a look with a link to Routes; and context, cache and cost.',
+  'router-pane-now.svg',
+);
 usagePane(
   { usagePeriod: '7d', usageGroup: 'activity', usageOpen: 'activity:code' },
   'Router pane, Usage tab',

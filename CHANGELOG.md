@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+The Now tab shows this session and today instead of the last 30 replies, a window that matched no session, hour or day. See [Open the router pane](docs/user-guide.md#open-the-router-pane).
+
+### Changed
+
+- **SESSION** replaces **LAST 30 REPLIES**. Its strip colors every reply of the session by tier; past 48 cells, or on a narrow pane, pairs of cells merge and the strip says how many replies a cell holds. After a restart of Claude Code the strip starts again and says since when. Its heading gives since when, the routed replies and the route switches. The switches are the ones the Usage tab counts, so a pin is not one. The replies per tier and per activity follow.
+- **Pin next** replaces the TIERS ladder: one button per tier with the classifier's support, `▶` on the tier that runs now. The tab is four rows shorter.
+
+### Added
+
+- **last switch** on the Now tab: when the route last changed, between which tiers, or between which routes inside a tier, and the activity. It includes the moves inside a turn that raise the `Model changed` toast.
+- What routing saved or cost against your model this session, with the switch cache writes in it, and a **Usage** link that opens the Usage tab on Session.
+- **TODAY**, once another session added to today: the same line for every session today, with a **Usage** link on Today.
+- **WORTH A LOOK · today**: the Usage tab's first finding for today, from 20 replies, with its link to Routes or Policy.
+
 ## 1.12.0 (2026-10-13)
 
 The Usage tab now shows any period, not only this session and the time since the last reset. See [Compare routing with your model](docs/user-guide.md#compare-routing-with-your-model).

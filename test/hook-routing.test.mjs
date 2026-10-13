@@ -482,7 +482,7 @@ test('clear after a manual /model choice on a non-baseline model starts Auto', a
   assert.equal(h.preferences.get('mode:s2'), 'auto');
 });
 
-test('replies record the tier that served them and the strip counts switches', async () => {
+test('replies record the tier that served them, and the strip shows a reply routing did not serve as a dot', async () => {
   const h = harness();
   await start(h);
   await h.event('command.run', { command: 'router', args: 'pin high' });
@@ -493,7 +493,12 @@ test('replies record the tier that served them and the strip counts switches', a
   assert.equal(h.view().history.length, 2);
   await drain(h.step({ ...step, turnId: 't3' }, { usage: null }));
   assert.equal(h.view().tiers.length, h.view().history.length);
-  assert.ok(texts(await h.render()).some((line) => /0 model switches/.test(line)));
+  const { from, ...strip } = h.view().strip;
+  assert.ok(Number.isFinite(from));
+  assert.deepEqual(strip, { per: 1, cells: [{ high: 1 }, { none: 1 }] });
+  const lines = texts(await h.render());
+  assert.ok(lines.includes('█'), 'the pinned reply is a high cell');
+  assert.ok(lines.includes('· not routed 1'));
 });
 
 test('the router command opens the pane, switches modes and pins, with no setup or status forms', async () => {
@@ -585,7 +590,13 @@ test('a turn routed as ops moves up once its own tool calls edit code, and stays
   assert.deepEqual([h.loop().decision.reason, h.loop().lastActivity], ['activity-up', 'code']);
   assert.equal(h.toasts.length, 1);
   assert.match(h.toasts[0], /^Model changed: Haiku 5\.5 · high → Opus 5\.5 · medium · coding/);
-  assert.equal(h.view().activities.at(-1), 'code');
+  const { at, ...moved } = h.view().lastSwitch;
+  assert.ok(Number.isFinite(at));
+  assert.deepEqual(moved, {
+    from: { tier: 'medium', model: 'claude-haiku-5-5', effort: 'high' },
+    to: { tier: 'medium', model: 'claude-opus-5-5', effort: 'medium' },
+    activity: 'code',
+  });
 });
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -618,6 +629,29 @@ test('inside a turn the classifier is asked again in the background and a clear 
   assert.deepEqual(reviewed(h).slice(4), ['claude-haiku-5-5@high', 'claude-opus-5-5@xhigh', 'claude-opus-5-5@xhigh']);
   assert.equal(h.loop().decision.reason, 'jump');
   assert.equal(h.toasts.length, 1);
+  const { at, from, to } = h.view().lastSwitch;
+  assert.ok(Number.isFinite(at));
+  assert.deepEqual(
+    [from, to],
+    [
+      { tier: 'low', model: 'claude-haiku-5-5', effort: 'high' },
+      { tier: 'high', model: 'claude-opus-5-5', effort: 'xhigh' },
+    ],
+  );
+});
+
+test('a pinned turn changes the route without becoming the last switch', async () => {
+  const model = 'claude-haiku-5-5';
+  const h = harness(JEV_KEY);
+  h.model(model);
+  answering(h, jevResponse('low', LOW));
+  await start(h);
+  await drain(h.step({ ...step, model }));
+  await h.event('turn.complete', { turnId: step.turnId });
+  await h.event('command.run', { command: 'router', args: 'pin high' });
+  await drain(h.step({ ...step, turnId: 't2', model }));
+  assert.equal(h.requests.at(-1).model, 'claude-opus-5-5');
+  assert.equal(h.view().lastSwitch, null);
 });
 
 test('inside a turn a cheaper answer moves down only after the dwell and a passed verification', async () => {
@@ -775,7 +809,19 @@ test('with activity routing on, an ops turn moves from Sonnet to Haiku inside it
   line = (await band(h)).line;
   assert.match(line, / low {2}running → Haiku 5\.5 · high/);
   assert.match(line, /↘ running/);
-  assert.deepEqual(h.view().activities, ['code', 'ops']);
+  const { at, ...moved } = h.view().lastSwitch;
+  assert.ok(Number.isFinite(at));
+  assert.deepEqual(moved, {
+    from: { tier: 'low', model: 'claude-sonnet-5-5', effort: 'high' },
+    to: { tier: 'low', model: 'claude-haiku-5-5', effort: 'high' },
+    activity: 'ops',
+  });
+  const now = texts(await h.render());
+  assert.ok(
+    now.includes('Sonnet 5.5 · high') && now.includes('Haiku 5.5 · high'),
+    'a switch inside a tier names routes',
+  );
+  assert.ok(now.includes(' 1 · ') && now.includes(' 1'), 'the session counts a reply per activity');
   const { byActivity, ...counts } = h.view().activityStats;
   assert.deepEqual(
     Object.fromEntries(Object.entries(byActivity).map(([name, { routedUsd, ...rest }]) => [name, rest])),
@@ -814,7 +860,8 @@ test('with activity routing on, an ops turn moves from Sonnet to Haiku inside it
   h.clear('s2');
   await h.event('session.start', { cwd: '/fixture' });
   await turn(h, 't3', 'claude-sonnet-5-5', ['Bash']);
-  assert.deepEqual(h.view().activities, ['ops']);
+  assert.deepEqual(h.view().strip.cells, [{ low: 1 }], 'a new session starts its own strip');
+  assert.equal(h.view().lastSwitch, null);
   assert.deepEqual(Object.keys(h.view().activityStats.byActivity), ['ops']);
   assert.equal(h.view().activityStats.byActivity.ops.turns, 1);
 
@@ -1082,7 +1129,11 @@ test('with activity routing on, a turn without an activity answer keeps the acti
   await turn(h, 't1', 'claude-sonnet-5-5', ['Edit']);
   await turn(h, 't2', 'claude-sonnet-5-5', ['Edit']);
   assert.equal(h.loop().lastActivity, 'code');
-  assert.deepEqual(h.view().activities, ['code', 'code']);
+  const { cells } = summarize(readUsage(h.preferences.get('usage:v1:s1')), { from: null, to: null });
+  assert.deepEqual(
+    Object.entries(cells).map(([key, sums]) => [key.split('|')[0], sums[0]]),
+    [['code', 2]],
+  );
   assert.deepEqual(savedStats(h.preferences).runs, { code: [1, 0, 0, 0, 0] });
 });
 

@@ -116,7 +116,14 @@ import {
   USAGE_PREFIX,
   usageAfterReset,
 } from '../lib/usage.mjs';
-import { CLEARED_READINGS, continuationView, healthOf, initialView, responseMetrics } from '../lib/view.mjs';
+import {
+  CLEARED_READINGS,
+  continuationView,
+  healthOf,
+  initialView,
+  responseMetrics,
+  switchView,
+} from '../lib/view.mjs';
 
 // The engine follows $ only into functions declared in this file, never across an import: every helper that takes $
 // lives here, and the pure parts live in lib/.
@@ -626,7 +633,7 @@ async function* passMain($, e, next, loop, version, nativeModel, reason, router)
     const compared = await compareYours($, router, loop, response, e.effort ?? null, nativeModel);
     if (compared) observed.yoursBy = compared.states;
     const written = await $.state.set(ref, observed, { ifVersion: version });
-    if (written.isSet) await updateView($, router, responseMetrics(router.view, response, null));
+    if (written.isSet) await updateView($, router, responseMetrics(router.view, response, null, Date.now()));
   }
   return response;
 }
@@ -719,6 +726,7 @@ async function decideTurn($, router, e, signal, step) {
       routes: {},
     });
     await updateView($, router, {
+      ...(activity.switched ? switchView(previous, selected.decision, activity.label, Date.now()) : {}),
       phase: 'routed',
       selectedModel: selected.decision.model,
       actualModel: null,
@@ -772,6 +780,9 @@ async function transcript($) {
   }
 }
 
+// The activity a route runs for, as the view labels it: only activity routing `on` applies one.
+const activityLabel = (cfg, decision) => (cfg.activityRouting === 'on' ? (decision.activity ?? null) : null);
+
 // A tool continuation whose turn shows stronger work than its route was chosen for moves up once (observedMove). Only
 // tool calls after the last applied review count (`loop.observedFrom`): the review judged the ones before. The
 // transcript is read only when some activity's route at this tier is stronger than the running one.
@@ -787,7 +798,11 @@ async function moveOnObserved($, router, cfg, loop, e, context) {
   // Replies from here on are labelled with the moved activity; the classifier's answer stays as recorded.
   const turn = router.turnActivities.get(e.turnId);
   if (turn) router.turnActivities.set(e.turnId, { ...turn, label: moved.decision.activity });
-  await updateView($, router, { estimate: moved.decision.estimate ?? null, comparison: null });
+  await updateView($, router, {
+    estimate: moved.decision.estimate ?? null,
+    comparison: null,
+    ...switchView(loop.decision, moved.decision, activityLabel(cfg, moved.decision), Date.now()),
+  });
   return moved;
 }
 
@@ -820,6 +835,11 @@ async function reviewMidTurn($, router, cfg, loop, e, { context, nativeModel, av
       $.ui.toast(switchToast(cfg, previous, selected.decision, selected.decision.estimate));
       const turn = router.turnActivities.get(e.turnId);
       if (turn) router.turnActivities.set(e.turnId, { ...turn, label: selected.decision.activity ?? null });
+      await updateView(
+        $,
+        router,
+        switchView(previous, selected.decision, activityLabel(cfg, selected.decision), Date.now()),
+      );
     }
     // The pane shows the readings behind the route; a review by a classifier the pane no longer labels keeps them off.
     if (cfg.classifier === router.config.classifier)
@@ -870,17 +890,10 @@ async function reviewMidTurn($, router, cfg, loop, e, { context, nativeModel, av
   return { ...loop, reviewedAt: loop.requests ?? 0 };
 }
 
-// A routed reply's metrics in the view, labelled with the turn's activity when its tier served it, and added to the
-// turn's activity record with its list price (`routedUsd`, null when unpriced) and, when its tier served it, its route.
+// A routed reply's metrics in the view, with the tier that served it, and added to the turn's activity record with its list price (`routedUsd`, null when unpriced) and, when its tier served it, its route.
 async function publishReply($, router, turnId, response, tier, route, routedUsd) {
   const turn = router.turnActivities.get(turnId);
-  const metrics = responseMetrics(
-    router.view,
-    response,
-    tier,
-    tier ? (turn?.label ?? null) : null,
-    tier ? route : null,
-  );
+  const metrics = responseMetrics(router.view, response, tier, Date.now());
   await updateView($, router, metrics);
   if (turn)
     router.turnActivities.set(turnId, {
@@ -1324,6 +1337,12 @@ function paneActions($, router, view) {
       () => ({ ...patch, lastWrite: { label, leaves }, notice: `Saved: ${label}. Applies from the next turn.` }),
     );
   };
+  // The Usage tab's period, kept across sessions; a failed save keeps it for this session.
+  const showPeriod = async (period, patch = {}) => {
+    if (!PERIODS.includes(period)) return;
+    await $.store.set(PERIOD_KEY, period).catch(() => {});
+    await updateView($, router, { usagePeriod: period, usageOpen: null, ...patch });
+  };
   return {
     mode: (mode) => changeMode($, router, mode),
     tab: (tab) => updateView($, router, { tab, notice: null, confirmDelete: false }),
@@ -1382,12 +1401,9 @@ function paneActions($, router, view) {
     removeActivity: (activity, tier) => editCell(activity, tier, 'remove'),
     selectCell: (cell) => updateView($, router, { routeCell: cell, notice: null }),
     usageDetail: () => updateView($, router, { usageDetail: !(router.view ?? view).usageDetail }),
-    // The Usage tab's period, kept across sessions; a failed save keeps it for this session.
-    period: async (period) => {
-      if (!PERIODS.includes(period)) return;
-      await $.store.set(PERIOD_KEY, period).catch(() => {});
-      await updateView($, router, { usagePeriod: period, usageOpen: null });
-    },
+    period: (period) => showPeriod(period),
+    // The Now tab's Usage links: the Usage tab on the period the line sums.
+    usageFor: (period) => showPeriod(period, { tab: 'usage', notice: null, confirmDelete: false }),
     usageGroup: (group) => updateView($, router, { usageGroup: group, usageOpen: null }),
     usageCompare: () => updateView($, router, { usageCompare: !(router.view ?? view).usageCompare }),
     usageOpen: (row) => updateView($, router, { usageOpen: row }),

@@ -106,7 +106,7 @@ test('while routing is unavailable the header says why and offers no on/off or p
     assert.deepEqual(lines.slice(0, 5), ['ROUTING', '  ', 'unavailable', '  Claude’s model is kept', reason], reason);
     assert.equal(lines.includes(GATEWAY_CLEANUP[0]), cleanup, reason);
     assert.ok(!lines.some((line) => /Jev ready|keeping the model/.test(line)), reason);
-    assert.ok(lines.includes('  Pins need routing, which is unavailable.'), reason);
+    assert.ok(lines.includes('needs routing, which is unavailable'), reason);
     const keys = controls(tree).map((c) => c.key);
     for (const key of ['auto', 'manual', 'pin-low']) assert.ok(!keys.includes(key), `${reason}: ${key}`);
   }
@@ -159,7 +159,7 @@ test('the Now tab says what runs next turn and why: the tier, the model, the sup
   const off = screen(pane({ ...routed, mode: 'manual', selectedModel: null, nativeModel: 'claude-opus-5-5' }));
   assert.equal(off[3], 'Next turn  ▌high  Opus 5.5 · xhigh  your /model choice, routing off');
   assert.ok(!off.some((line) => line.includes('needs 82%')));
-  assert.ok(off.includes('  Pins need routing on (o above).'));
+  assert.ok(off.includes('Pin next   needs routing on (o above)'));
 });
 
 const recording = () => {
@@ -212,27 +212,6 @@ test('the Now tab names the activity as a verb and marks an override', () => {
   );
   const verb = texts(renderPanel(ELEMENTS, DEFAULTS, view({ ...sonnetLow, ...reading }), null, actions));
   assert.ok(verb.includes('coding'), 'the activity is its own orange italic Text');
-});
-
-test('the last replies show the tiers as a strip with the switch count, the replies per tier and per activity', () => {
-  const lines = screen(
-    pane({
-      tiers: ['low', null, 'medium', 'low'],
-      activities: ['ops', null, 'docs'],
-      routes: ['h@high', null, 'o@medium', 'h@high'],
-    }),
-  );
-  const at = lines.indexOf('LAST 4 REPLIES · 1 model switch');
-  assert.deepEqual(lines.slice(at + 1, at + 4), [
-    '  █·██',
-    '  ■ low 2  ■ medium 1  · not routed 1',
-    '  running 1 · documenting 1',
-  ]);
-  assert.ok(screen(pane({ tiers: ['micro'], routes: ['h@medium'] })).includes('LAST REPLY · 0 model switches'));
-  const untagged = screen(pane({ tiers: ['low', 'medium'], activities: [], routes: ['h@high', 'o@medium'] }));
-  const head = untagged.indexOf('LAST 2 REPLIES · 1 model switch');
-  assert.deepEqual(untagged.slice(head + 1, head + 4), ['  ██', '  ■ low 1  ■ medium 1', '']);
-  assert.ok(screen(pane({})).includes('  no replies yet'));
 });
 
 const routesTab = (config, routeDraft = null, props = {}, paneActions = actions, options = {}) =>

@@ -466,7 +466,7 @@ test('Manual mode shows no pin buttons', async () => {
   await press(h, 'manual');
   const pane = await h.render();
   assert.ok(!controls(pane).some((node) => node.key.startsWith('pin-')));
-  assert.ok(texts(pane).some((line) => /Pins need routing on/.test(line)));
+  assert.ok(texts(pane).includes('needs routing on (o above)'));
 });
 
 test('a classifier row switches at once, Undo from any tab returns to the previous one, and a switch clears the old health', async () => {
@@ -552,8 +552,14 @@ test('a switch clears the previous classifier readings, so no label claims them'
   for (const field of ['adviceMs', 'adviceChoice', 'probabilities', 'estimate', 'error'])
     assert.equal(h.view()[field], null, field);
   await press(h, 'tab-now');
-  assert.ok(texts(await h.render()).some((line) => /Clef support/.test(line)));
-  assert.ok(!texts(await h.render()).some((line) => /Clef gave/.test(line)));
+  const pane = await h.render();
+  assert.ok(texts(pane).some((line) => /^Clef ready/.test(line)));
+  assert.ok(!texts(pane).some((line) => /Clef gave/.test(line)));
+  const pins = controls(pane).filter((c) => c.key.startsWith('pin-'));
+  assert.deepEqual(
+    pins.map((c) => c.label),
+    ['▶ high —', 'medium —', 'low —', 'micro —'],
+  );
 });
 
 test('a turn classified when the switch lands keeps its route, and its answer touches neither health nor status', async () => {

@@ -196,10 +196,17 @@ declare module 'claude-code' {
     activityProbabilities?: Partial<Record<RouterActivityAnswer, number>> | null;
     history?: number[];
     tiers?: (RouterTier | null)[];
-    // Aligned with `history` and `tiers`.
-    activities?: (RouterActivity | null)[];
-    // The (model, effort) each reply's request went out with, aligned with tiers; null where routing did not choose.
-    routes?: (string | null)[];
+    // Every reply since Claude Code started the session by tier: each cell counts up to `per` replies, `none` for one
+    // routing did not serve; `from` is when the first one arrived (ms).
+    strip?: { per: number; cells: Partial<Record<RouterTier | 'none', number>>[]; from?: number | null } | null;
+    // The last route switch, at turn start or inside a turn: when, the routes it moved between with their tiers, and
+    // the activity the new route runs for.
+    lastSwitch?: {
+      at: number;
+      from: { tier: RouterTier | null; model: string; effort: string | null };
+      to: { tier: RouterTier | null; model: string; effort: string | null };
+      activity: RouterActivity | null;
+    } | null;
     activityStats?: RouterActivitySession | null;
     // The counts kept across sessions as last read or written.
     activityStore?: RouterActivityStore | null;

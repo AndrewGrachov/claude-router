@@ -59,7 +59,7 @@ test('terminal and desktop panes show observed usage, cost scenarios and native 
     cacheWrite: 25_000,
     history: [100_000, 150_000, 120_000],
     tiers: ['low', 'micro', 'low'],
-    routes: ['claude-haiku-5-5@high', 'claude-haiku-5-5@medium', 'claude-haiku-5-5@high'],
+    strip: { per: 1, cells: [{ low: 1 }, { micro: 1 }, { low: 1 }] },
     adviceMs: 390,
     comparison: {
       incumbent: 'low',
@@ -93,7 +93,8 @@ test('terminal and desktop panes show observed usage, cost scenarios and native 
     });
     expect(await pane.find({ type: 'Text', text: /Context.*15%.*1.00M/ })).toBeDefined();
     expect(await pane.find({ type: 'Text', text: /80% reused on the last reply/ })).toBeDefined();
-    expect(await pane.find({ type: 'Text', text: /2 model switches/ })).toBeDefined();
+    expect(await pane.find({ type: 'Text', text: / · 3 replies/ })).toBeDefined();
+    expect(await pane.find({ type: 'Text', text: /^low 2/ })).toBeDefined();
     expect(await pane.find({ type: 'Text', text: /cost \$0.250/ })).toBeDefined();
     await pane.press({ key: 'usage-detail' });
     await pane.redraw();
