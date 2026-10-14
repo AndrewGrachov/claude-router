@@ -1,0 +1,19 @@
+scripts/probe-activity.mjs
+  s_b4c2632159d10c::t_2c8bacb6aefdf0 89,111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "9725048c23635f8f7702a9408e2f1fba18218698",
+  "prompts": {},
+  "sessions": {
+    "s_b4c2632159d10c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_b4c2632159d10c",
+        "model": "unknown"
+      },
+      "human_author": "Andrii Hrachov <andrii.hrachov@deliveryhero.com>"
+    }
+  }
+}
