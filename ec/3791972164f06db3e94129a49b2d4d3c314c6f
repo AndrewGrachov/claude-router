@@ -1,0 +1,19 @@
+scripts/probe-classifier.mjs
+  s_f310c92876fa74::t_154124f28658f0 54-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ec3791972164f06db3e94129a49b2d4d3c314c6f",
+  "prompts": {},
+  "sessions": {
+    "s_f310c92876fa74": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "789da388-1d70-4615-82d2-0636552c6c8d",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrii Hrachov <andrii.hrachov@deliveryhero.com>"
+    }
+  }
+}
