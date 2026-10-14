@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.14.0 (2026-10-14)
 
 Subagents now show which model each agent ran on, who picked it, and for which period. See [Understand usage and estimates](docs/user-guide.md#understand-usage-and-estimates).
 
