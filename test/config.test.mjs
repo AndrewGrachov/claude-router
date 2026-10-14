@@ -108,6 +108,11 @@ for (const [name, userFile, message] of [
   ['a non-string classifier model', { classifiers: { jev: { model: 5 } } }, /classifiers\.jev\.model/],
   ['a key option that is not a plugin option', { classifiers: { jev: { keyOption: 'house_key' } } }, /keyOption/],
   ['an unknown classifier API', { classifiers: { jev: { api: 'anthropic' } } }, /classifiers\.jev\.api/],
+  ['a key header with a space', { classifiers: { jev: { keyHeader: 'x bad' } } }, /classifiers\.jev\.keyHeader/],
+  ['a key header with a line break', { classifiers: { jev: { keyHeader: 'a\r\nb' } } }, /classifiers\.jev\.keyHeader/],
+  ['a reserved key header', { classifiers: { jev: { keyHeader: 'Cookie' } } }, /classifiers\.jev\.keyHeader/],
+  ['a non-string key header', { classifiers: { jev: { keyHeader: 5 } } }, /classifiers\.jev\.keyHeader/],
+  ['a key header without a key', { classifiers: { ollama: { keyHeader: 'x-key' } } }, /classifiers\.ollama\.keyHeader/],
   [
     'an endpoint setting that is not a plugin option',
     { classifiers: { jev: { endpoint: 'https://x/{region}/decide' } } },
@@ -386,6 +391,28 @@ test('withClassifierTimeout writes only a deadline that differs from the default
 test('classifiers read exactly the options plugin.json declares', () => {
   const manifest = JSON.parse(readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8'));
   assert.deepEqual(Object.keys(manifest.userConfig).sort(), Object.keys(CLASSIFIER_OPTIONS).sort());
+});
+
+test('a gateway entry reads the gateway key and may name the header it travels in', () => {
+  const config = loadConfig({
+    userFile: {
+      classifier: 'litellm',
+      classifiers: {
+        litellm: {
+          label: 'Jev via LiteLLM',
+          endpoint: 'https://litellm.example.internal/v1/systemone',
+          model: 'jev',
+          keyOption: 'gateway_api_key',
+          keyHeader: 'X-Litellm-Key',
+          timeoutMs: 2500,
+        },
+      },
+    },
+  });
+  assert.equal(config.classifiers.litellm.api, 'system-one');
+  assert.equal(config.classifiers.litellm.model, 'jev');
+  assert.equal(config.classifiers.litellm.keyHeader, 'X-Litellm-Key');
+  assert.equal(config.classifiers.jev.keyHeader, undefined);
 });
 
 test('a keyless classifier needs no key option; a user entry speaks System One unless it names an API', () => {

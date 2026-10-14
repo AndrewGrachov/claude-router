@@ -9,7 +9,7 @@
   },
   "repository": "https://github.com/alexei-led/claude-router",
   "license": "MIT",
-  "keywords": ["router", "jev", "typesafe", "clef", "cloudflare", "openai", "ollama", "effort", "mods"],
+  "keywords": ["router", "jev", "typesafe", "clef", "cloudflare", "openai", "ollama", "litellm", "effort", "mods"],
   "userConfig": {
     "typesafe_api_key": {
       "type": "string",
@@ -32,6 +32,12 @@
       "type": "string",
       "title": "OpenAI API key (OpenAI classifier)",
       "description": "OpenAI API key for the gpt-6-luna classifier. Used only when the classifier is OpenAI; the bounded prompt text then goes to OpenAI. Ollama needs no key.",
+      "sensitive": true
+    },
+    "gateway_api_key": {
+      "type": "string",
+      "title": "LLM gateway API key (LiteLLM)",
+      "description": "Key for a classifier entry in router.json that points at your own gateway, such as a LiteLLM proxy. The bounded prompt text then goes to that gateway's host.",
       "sensitive": true
     }
   },

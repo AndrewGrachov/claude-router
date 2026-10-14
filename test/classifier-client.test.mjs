@@ -91,6 +91,47 @@ test('native Jev sends the shared contract and reads text and plain headers', as
   assert.equal(result.advice.choice, 'medium');
 });
 
+test('a key header sends the bearer key in that header and not in authorization', async () => {
+  const timing = clock();
+  const config = {
+    ...DEFAULTS,
+    classifiers: { ...DEFAULTS.classifiers, jev: { ...DEFAULTS.classifiers.jev, keyHeader: 'X-Litellm-Key' } },
+  };
+  const gateway = new ClassifierClient({ now: timing.now });
+  const result = await gateway.ask({
+    ...input(timing, async (_url, init) => {
+      assert.equal(init.headers['x-litellm-key'], 'Bearer synthetic-test-key');
+      assert.equal(Object.hasOwn(init.headers, 'authorization'), false);
+      return ok();
+    }),
+    config,
+  });
+  assert.equal(result.error, null);
+});
+
+test('a keyed Ollama-protocol gateway sends the key header on the activity request too', async () => {
+  const timing = clock();
+  const headers = [];
+  const config = loadConfig({
+    userFile: {
+      classifier: 'ollama',
+      activityRouting: 'on',
+      classifiers: { ollama: { keyOption: 'gateway_api_key', keyHeader: 'X-Litellm-Key' } },
+    },
+  });
+  const client = new ClassifierClient({ now: timing.now });
+  const result = await client.ask({
+    ...input(timing, async (_url, init) => {
+      headers.push(init.headers);
+      return local(headers.length === 1 ? routeAnswer : activityAnswer);
+    }),
+    config,
+  });
+  assert.equal(result.error, null);
+  assert.equal(headers.length, 2);
+  for (const sent of headers) assert.equal(sent['x-litellm-key'], 'Bearer synthetic-test-key');
+});
+
 test('the deadline is the active classifier deadline', async () => {
   for (const id of Object.keys(DEFAULTS.classifiers)) {
     const timing = clock();

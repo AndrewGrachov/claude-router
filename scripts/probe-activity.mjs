@@ -10,11 +10,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildActivityRequest, buildRequest, parseActivityAnswer, parseAnswers } from '../lib/classifier-apis.mjs';
+import { keyHeaderOf } from '../lib/classifier-client.mjs';
 import { resolveCredentials } from '../lib/classifier-contract.mjs';
 import { ACTIVITY_VALUES, loadConfig } from '../lib/config.mjs';
 import { isUsableProbe, writeProbeModule } from './probe-results.mjs';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
+// An option's upper-case name; the gateway key is read as LITELLM_API_KEY, as the hook reads it.
+const envSetting = (name) => process.env[name === 'gateway_api_key' ? 'LITELLM_API_KEY' : name.toUpperCase()]?.trim();
 const profile = join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'router.json');
 const userFile = existsSync(profile) ? JSON.parse(readFileSync(profile, 'utf8')) : null;
 const loaded = loadConfig({ userFile });
@@ -26,7 +29,7 @@ if (!Object.hasOwn(loaded.classifiers, id)) {
 // A profile with activity routing off would not ask the question at all.
 const config = { ...loaded, classifier: id, activityRouting: 'on' };
 const entry = config.classifiers[id];
-const credentials = await resolveCredentials(entry, (name) => process.env[name.toUpperCase()]?.trim());
+const credentials = await resolveCredentials(entry, (name) => envSetting(name));
 if (credentials.missing) {
   console.error(`${id}: ${credentials.missing}`);
   process.exit(2);
@@ -36,7 +39,7 @@ async function post(body) {
   const response = await fetch(credentials.endpoint, {
     method: 'POST',
     headers: {
-      ...(credentials.apiKey ? { authorization: `Bearer ${credentials.apiKey}` } : {}),
+      ...(credentials.apiKey ? { [keyHeaderOf(config)]: `Bearer ${credentials.apiKey}` } : {}),
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),

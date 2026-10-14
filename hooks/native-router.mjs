@@ -480,8 +480,8 @@ async function setActivityRouting($, router, mode) {
   return router.view.notice;
 }
 
-// The environment variables that stand in for a classifier option: its upper-case name, then the one Claude Code
-// exports for a plugin option. Spelled out because $.env.get takes literal names only. Cases: CLASSIFIER_OPTIONS.
+// The environment variables that stand in for a classifier option: its upper-case name (LITELLM_API_KEY for the
+// gateway key), then the one Claude Code exports for a plugin option. Spelled out because $.env.get takes literal names only. Cases: CLASSIFIER_OPTIONS.
 async function envSettingOf($, name) {
   switch (name) {
     case 'typesafe_api_key':
@@ -496,6 +496,9 @@ async function envSettingOf($, name) {
       );
     case 'openai_api_key':
       return (await $.env.get('OPENAI_API_KEY')) || (await $.env.get('CLAUDE_PLUGIN_OPTION_OPENAI_API_KEY'));
+    // Named after LiteLLM rather than a generic GATEWAY_API_KEY, so a key exported for another tool is not picked up.
+    case 'gateway_api_key':
+      return (await $.env.get('LITELLM_API_KEY')) || (await $.env.get('CLAUDE_PLUGIN_OPTION_GATEWAY_API_KEY'));
     default:
       return null;
   }

@@ -19,6 +19,7 @@ The active classifier is asked at the start of each logical turn, for the tier a
 | Clef Omni  | Cloudflare Workers AI, 30B MoE             | Cloudflare API token and account ID | Cloudflare                | The same                                                              |
 | OpenAI     | OpenAI, `gpt-6-luna` (public beta)         | OpenAI API key                      | OpenAI (`api.openai.com`) | A second `choice` in `questions`, in the same request                 |
 | Ollama     | A local [Ollama](https://ollama.com) model | None                                | Stays on this machine     | A second request: letters A to H, one token, if 300 ms or more remain |
+| Gateway    | Your LiteLLM proxy, any decision model     | Gateway API key                     | Your gateway's host       | As the protocol it speaks (`system-one` or `openai-decisions`)        |
 
 Jev is the default. [Configuration](docs/configuration.md#classifiers) gives the endpoints, timeouts, and how to add another service that speaks one of the supported protocols.
 

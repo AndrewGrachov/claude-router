@@ -127,6 +127,76 @@ for (const [id, label] of [
   });
 }
 
+test('a gateway entry asks the gateway with its model name and key header, its key from LITELLM_API_KEY', async () => {
+  const h = harness();
+  h.env.set('LITELLM_API_KEY', 'synthetic-gateway-key');
+  h.files.set(
+    CONFIG,
+    JSON.stringify({
+      classifier: 'litellm',
+      classifiers: {
+        litellm: {
+          label: 'Clef via LiteLLM',
+          endpoint: 'https://litellm.example.internal/v1/systemone',
+          model: 'cloudflare/clef-flash',
+          keyOption: 'gateway_api_key',
+          keyHeader: 'X-Litellm-Key',
+          timeoutMs: 2500,
+        },
+      },
+    }),
+  );
+  const calls = [];
+  h.http(async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true, status: 200, text: CLEF_FLASH_ANSWER, headers: {} };
+  });
+  await start(h);
+  await drain(h.step(step));
+  assert.equal(h.view().credentials.litellm, null);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://litellm.example.internal/v1/systemone');
+  assert.equal(calls[0].init.headers['x-litellm-key'], 'Bearer synthetic-gateway-key');
+  assert.equal(Object.hasOwn(calls[0].init.headers, 'authorization'), false);
+  assert.equal(JSON.parse(calls[0].init.body).model, 'cloudflare/clef-flash');
+  assert.equal(h.view().adviceChoice, 'micro');
+});
+
+test('the gateway key reads its plugin option before both environment variables, and names itself when missing', async () => {
+  const gateway = JSON.stringify({
+    classifier: 'litellm',
+    classifiers: {
+      litellm: {
+        label: 'LiteLLM',
+        endpoint: 'https://litellm.example.internal/v1/systemone',
+        model: 'jev',
+        keyOption: 'gateway_api_key',
+        timeoutMs: 2500,
+      },
+    },
+  });
+  for (const [name, options, env, header, missing] of [
+    ['the plugin option wins', { gateway_api_key: 'option' }, { LITELLM_API_KEY: 'env' }, 'Bearer option', null],
+    ['LITELLM_API_KEY', {}, { LITELLM_API_KEY: 'env' }, 'Bearer env', null],
+    ['the exported plugin option', {}, { CLAUDE_PLUGIN_OPTION_GATEWAY_API_KEY: 'exported' }, 'Bearer exported', null],
+    ['a generic GATEWAY_API_KEY is not read', {}, { GATEWAY_API_KEY: 'other-tool' }, null, 'missing-key'],
+  ]) {
+    const h = harness(options);
+    for (const [key, value] of Object.entries(env)) h.env.set(key, value);
+    h.files.set(CONFIG, gateway);
+    const calls = [];
+    h.http(async (_url, init) => {
+      calls.push(init);
+      return { ok: true, status: 200, text: CLEF_FLASH_ANSWER, headers: {} };
+    });
+    await start(h);
+    await drain(h.step(step));
+    assert.equal(h.view().credentials.litellm, missing, name);
+    assert.equal(calls[0]?.headers.authorization ?? null, header, name);
+    if (missing) assert.match((await band(h)).line, /⚠ LiteLLM: no API key/, name);
+  }
+});
+
 test('a missing account warns in the band and the pane and offers the key dialog', async () => {
   const h = harness({ cloudflare_api_token: 'synthetic-token' });
   h.files.set(CONFIG, JSON.stringify({ classifier: 'clef' }));

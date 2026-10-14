@@ -15,7 +15,7 @@ The router works with its built-in defaults. Configure the key of the active cla
 
 The active profile directory is `CLAUDE_CONFIG_DIR` when set. Otherwise it is `~/.claude`. The Mod does not need an Anthropic proxy URL, model alias, hint header, daemon, or custom status line.
 
-The Mod reads each value from its plugin option first. When the option is empty, it reads the environment variable of the same name in upper case, then the one Claude Code exports for the option:
+The Mod reads each value from its plugin option first. When the option is empty, it reads the environment variable of the same name in upper case (`LITELLM_API_KEY` for `gateway_api_key`, so a key another tool reads as `GATEWAY_API_KEY` is not picked up), then the one Claude Code exports for the option:
 
 | Plugin option           | Environment variables                                                 |
 | ----------------------- | --------------------------------------------------------------------- |
@@ -23,6 +23,7 @@ The Mod reads each value from its plugin option first. When the option is empty,
 | `cloudflare_api_token`  | `CLOUDFLARE_API_TOKEN`, `CLAUDE_PLUGIN_OPTION_CLOUDFLARE_API_TOKEN`   |
 | `cloudflare_account_id` | `CLOUDFLARE_ACCOUNT_ID`, `CLAUDE_PLUGIN_OPTION_CLOUDFLARE_ACCOUNT_ID` |
 | `openai_api_key`        | `OPENAI_API_KEY`, `CLAUDE_PLUGIN_OPTION_OPENAI_API_KEY`               |
+| `gateway_api_key`       | `LITELLM_API_KEY`, `CLAUDE_PLUGIN_OPTION_GATEWAY_API_KEY`             |
 
 Export the variables before you start `claude`. Without the key or the account ID of the active classifier, the Mod keeps Claude's current model and reports which value is missing.
 
@@ -142,9 +143,9 @@ Switch the mode with `/router activities off|on`, or with the **Activity routing
 { "classifier": "clef-flash" }
 ```
 
-An entry has six fields: `label` (the name the band and pane show), `api`, `endpoint`, `model`, `keyOption`, and `timeoutMs`. An entry without `api` speaks `system-one`. `endpoint` must use `https`; plain `http` is accepted only for `localhost`, `127.0.0.1`, or `[::1]`, because the key travels with each request. A `{name}` in `endpoint` is filled from the plugin option of that name, URL-encoded. `keyOption` names the plugin option sent as the bearer token, or is `null` when the service takes no key. Override one field of a built-in entry and the rest stay, for example `"classifiers": { "clef": { "timeoutMs": 4000 } }`.
+An entry has six fields: `label` (the name the band and pane show), `api`, `endpoint`, `model`, `keyOption`, and `timeoutMs`, and an optional seventh, `keyHeader`. An entry without `api` speaks `system-one`. `endpoint` must use `https`; plain `http` is accepted only for `localhost`, `127.0.0.1`, or `[::1]`, because the key travels with each request. A `{name}` in `endpoint` is filled from the plugin option of that name, URL-encoded. `keyOption` names the plugin option sent as the bearer token, or is `null` when the service takes no key. `keyHeader` names the header the token travels in, still as `Bearer <key>`, instead of `authorization`; it must be letters, digits and dashes, cannot be `content-type`, `content-length`, `cookie` or `host`, and needs a `keyOption`. Override one field of a built-in entry and the rest stay, for example `"classifiers": { "clef": { "timeoutMs": 4000 } }`.
 
-You can add an entry for another service that speaks one of the three protocols. Its `keyOption` and endpoint placeholders must be one of `typesafe_api_key`, `cloudflare_api_token`, `cloudflare_account_id`, or `openai_api_key`, or `null` for no key. Claude Code lets a Mod read only the options its manifest declares and environment variables it names in code, so an entry cannot bring a key of its own. Nor can it add request headers. For example, a company proxy in front of Jev:
+You can add an entry for another service that speaks one of the three protocols. Its `keyOption` and endpoint placeholders must be one of `typesafe_api_key`, `cloudflare_api_token`, `cloudflare_account_id`, `openai_api_key`, or `gateway_api_key`, or `null` for no key. Claude Code lets a Mod read only the options its manifest declares and environment variables it names in code, so an entry cannot bring a key of its own. Apart from `keyHeader`, it cannot add request headers. For example, a company proxy in front of Jev:
 
 ```json
 {
@@ -163,7 +164,37 @@ You can add an entry for another service that speaks one of the three protocols.
 
 The active classifier receives the current prompt and recent dialogue, as described in the [architecture](architecture.md#request-flow). Give a Cloudflare token Workers AI permissions only. The routing policy thresholds were tuned against Jev, and `activityMass` against none; another classifier's probabilities can place the same prompt differently.
 
-To check a classifier outside Claude Code, run `node scripts/probe-classifier.mjs [classifier]` from a checkout. It reads `router.json` and the upper-case variables `TYPESAFE_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `OPENAI_API_KEY` from the environment or `./.env`; it does not read plugin options or the `CLAUDE_PLUGIN_OPTION_*` names. It sends the router's real request, and prints the status, latency, and parsed answer. It never prints the key or the full endpoint. `node scripts/probe-activity.mjs [classifier]` does the same for the activity question with the [probe set](evaluation.md#activity-probe-set).
+To check a classifier outside Claude Code, run `node scripts/probe-classifier.mjs [classifier]` from a checkout. It reads `router.json` and the upper-case variables `TYPESAFE_API_KEY`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `OPENAI_API_KEY`, and `LITELLM_API_KEY` from the environment or `./.env`; it does not read plugin options or the `CLAUDE_PLUGIN_OPTION_*` names. It sends the router's real request, and prints the status, latency, and parsed answer. It never prints the key or the full endpoint. `node scripts/probe-activity.mjs [classifier]` does the same for the activity question with the [probe set](evaluation.md#activity-probe-set).
+
+### LLM gateway (LiteLLM)
+
+A gateway such as a [LiteLLM](https://docs.litellm.ai/docs/decisions) proxy (v1.104.2 or later) serves decision models on `POST /v1/systemone` (the `system-one` protocol) and `POST /v1/decisions` (the `openai-decisions` protocol). Add an entry that points at it, with `model` set to the gateway's model name: a `model_name` alias from its `model_list`, or a provider model such as `typesafe/jev-latest` or `cloudflare/clef-flash`. Save the gateway's virtual key in `gateway_api_key` with `/plugin configure router`, or export `LITELLM_API_KEY`. When the gateway reads its key from a header of its own (`litellm_key_header_name`), name it in `keyHeader`.
+
+```json
+{
+  "classifier": "litellm-jev",
+  "classifiers": {
+    "litellm-jev": {
+      "label": "Jev via LiteLLM",
+      "endpoint": "https://litellm.example.internal/v1/systemone",
+      "model": "jev",
+      "keyOption": "gateway_api_key",
+      "timeoutMs": 2500
+    },
+    "litellm-luna": {
+      "label": "Luna via LiteLLM",
+      "api": "openai-decisions",
+      "endpoint": "https://litellm.example.internal/v1/decisions",
+      "model": "luna",
+      "keyOption": "gateway_api_key",
+      "keyHeader": "X-Litellm-Key",
+      "timeoutMs": 3500
+    }
+  }
+}
+```
+
+The gateway adds a hop, so give it a longer `timeoutMs` than the service behind it. The prompt text goes to the gateway's host, which the Classifier tab shows on the entry's row.
 
 ### OpenAI
 

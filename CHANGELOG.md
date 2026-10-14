@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A classifier behind your own LLM gateway, such as a LiteLLM proxy. Add an entry in `router.json` with the gateway's `/v1/systemone` or `/v1/decisions` URL and its model name, and save the gateway key in the new `gateway_api_key` plugin option (or `LITELLM_API_KEY`). See [LLM gateway](docs/configuration.md#llm-gateway-litellm).
+- `keyHeader` on a classifier entry: the header the bearer key travels in, for a gateway that reads it from its own header, such as `X-Litellm-Key`.
+
 ## 1.14.0 (2026-10-14)
 
 Subagents now show which model each agent ran on, who picked it, and for which period. See [Understand usage and estimates](docs/user-guide.md#understand-usage-and-estimates).

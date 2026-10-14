@@ -145,6 +145,36 @@ test('a classify type asks with the task text alone and runs a clearly hard task
   });
 });
 
+test('a classify type behind a gateway sends the key in the entry’s key header', async () => {
+  const h = await started(
+    {
+      subagentRouting: 'on',
+      classifier: 'litellm',
+      classifiers: {
+        litellm: {
+          label: 'LiteLLM',
+          endpoint: 'https://litellm.example.internal/v1/systemone',
+          model: 'jev',
+          keyOption: 'gateway_api_key',
+          keyHeader: 'X-Litellm-Key',
+          timeoutMs: 2500,
+        },
+      },
+    },
+    { gateway_api_key: 'synthetic-gateway-key' },
+  );
+  const calls = [];
+  h.http(async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true, status: 200, text: JSON.stringify(HARD), headers: {} };
+  });
+  const { sent } = await h.spawn(spawnInput({ subagentType: 'general-purpose' }));
+  assert.equal(sent.model, 'claude-opus-5-5');
+  assert.equal(calls[0].url, 'https://litellm.example.internal/v1/systemone');
+  assert.equal(calls[0].init.headers['x-litellm-key'], 'Bearer synthetic-gateway-key');
+  assert.equal(Object.hasOwn(calls[0].init.headers, 'authorization'), false);
+});
+
 test('a classifier failure keeps core’s model and counts the failure', async () => {
   const h = await started({ subagentRouting: 'on' });
   h.http(async () => ({ ok: false, status: 400, text: '', headers: {} }));

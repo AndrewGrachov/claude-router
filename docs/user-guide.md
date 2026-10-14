@@ -23,6 +23,7 @@ In Claude Code:
    - **Clef**, **Clef Flash** or **Clef Omni** on Cloudflare Workers AI: the Cloudflare API token and the Cloudflare account ID. One token covers all three models.
    - **OpenAI**: an OpenAI API key. The prompt text goes to OpenAI.
    - **Ollama**: no credential. Run `ollama serve` and pull the model; the prompt text stays on this machine.
+   - **Your LLM gateway**, such as a LiteLLM proxy: the gateway API key. Add the gateway's entry to `router.json` first; see [LLM gateway](configuration.md#llm-gateway-litellm). The prompt text goes to the gateway's host.
 3. To use another classifier, open the pane's **Classifier** tab and select its row. See [Choose the classifier](#choose-the-classifier).
 4. Check the band above the prompt: `Routing on · ready`. On a model that no tier routes to, and that no activity override uses with activity routing `on`, the session starts with routing off and the band says why; run `/router auto` to route.
 
@@ -279,6 +280,8 @@ Router asks one classifier per turn. Six are built in:
 | Clef Omni  | Cloudflare Workers AI, 30B MoE | Cloudflare API token and Cloudflare account ID | 3,000 ms |
 | OpenAI     | OpenAI, `gpt-6-luna`           | OpenAI API key                                 | 3,000 ms |
 | Ollama     | Local Ollama, `qwen3.5:9b`     | None                                           | 5,000 ms |
+
+To ask a decision model through your own LLM gateway, such as a LiteLLM proxy, add an entry with its URL and model name to `router.json` and save the gateway API key; its row then appears on this tab. See [LLM gateway](configuration.md#llm-gateway-litellm).
 
 The three Clef models take the same request and the same Cloudflare credentials, so a switch between them changes only cost, speed and answers. Cloudflare bills input tokens only, per million: Clef Flash $0.038, Clef Omni $0.15, Clef $0.24 (list prices on 2026-10-13). A routing request is a few thousand tokens. In Cloudflare's own benchmarks no one model wins every task: Clef Omni leads on intent classification (BANKING77, CLINC150 with out-of-scope prompts), Clef on most of TypeSafe's workflow evals, and Clef Flash on tool-call tasks. Router has not measured Clef Omni on its own prompts yet. Clef Omni also reads images, audio and video; Router sends it text only.
 
