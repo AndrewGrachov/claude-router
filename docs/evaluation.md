@@ -136,27 +136,28 @@ Limits:
 
 ## Subagent routing
 
-Subagent routing has no measured result over time yet. It is `on` by default since 1.9. The Usage tab's **SUBAGENTS** section shows the counts kept across sessions since the last reset:
+Subagent routing has no measured result over time yet. It is `on` by default since 1.9. The Usage tab's **SUBAGENTS** section shows the counts for the chosen period:
 
-- Per routed type: agents; **moved**, the agents whose decided model differs from the one they ran on; requests per agent; respawns; the choices by model; classifier failures; and `core → routed`, the list price of the agents' tokens on core's model against the decided one.
-- **Not routed**, the spawns that passed through, by reason (`fork`, `workflow`, `explicit`, `teammate`, `unlisted`, `pinned`, `unknown`), priced on the model they ran on. This is the share of subagent spend that routing cannot reach.
+- Every agent by the model it ran on, filled when the router moved it off core's model, and what routing saved or cost on the routed agents.
+- **ROUTED**, per type: agents, routed cost, and **vs CC**, the same tokens on core's model. Open, per model: the agents the router kept, moved up or moved down by output price, and their cost; requests per agent, respawns and classifier failures.
+- **NOT ROUTED**, the spawns that passed through, by reason (`fork`, `workflow agent`, `explicit model`, `teammate`, `type not routed`, `pinned model`, `no definition`), priced on the model they ran on. This is the share of subagent spend that routing cannot reach.
 
 Method:
 
-- `routed` is the reply on the routed model and `core` the same tokens on core's model as the router estimates it: `CLAUDE_CODE_SUBAGENT_MODEL`, except for Explore and Plan without `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, else the parent's model. A subagent starts with a cold cache on one model and keeps it, so its own token counts on another model are a fair counterfactual. `ratesAt` applies Haiku 5.5's 5x rate above 100,000 prompt tokens. Explore agents often pass that, so Haiku can cost more than its base price suggests.
+- The routed cost is the reply on the routed model and **vs CC** the same tokens on core's model as the router estimates it: `CLAUDE_CODE_SUBAGENT_MODEL`, except for Explore and Plan without `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, else the parent's model. A subagent starts with a cold cache on one model and keeps it, so its own token counts on another model are a fair counterfactual. `ratesAt` applies Haiku 5.5's 5x rate above 100,000 prompt tokens. Explore agents often pass that, so Haiku can cost more than its base price suggests.
 - Cache writes are priced at the subagent lifetime: five minutes unless `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, `subagentPromptCacheTtl` or `ENABLE_PROMPT_CACHING_1H` say otherwise, on a subscription too.
 - The counts cannot see quality. Two proxies stand in for it: requests per agent, and **respawns**, a spawn of the same type by the same parent within 10 minutes after one finished.
 
 Checks:
 
-- `test/subagents.test.mjs` covers each pass reason, the pin rule, the classify mapping, core's model estimate, the subagent lifetime, Haiku's long-context price, and the store's merge, reset and bad values. `test/hook-subagents.test.mjs` covers `on` (the routed model), a fork, an explicit model, a teammate, a workflow agent and a pinned project agent (each passes), a classifier failure (core's model), parallel spawns, a spawn-path pause that leaves main routing alone, respawns, session end, Delete history and the Usage tab.
+- `test/subagents.test.mjs` covers each pass reason, the pin rule, the classify mapping, core's model estimate, the router's move, the subagent lifetime, Haiku's long-context price, and the store's days, merge, reset, bad values and records from before 1.14.0. `test/hook-subagents.test.mjs` covers `on` (the routed model), a fork, an explicit model, a teammate, a workflow agent and a pinned project agent (each passes), a classifier failure (core's model), parallel spawns, a spawn-path pause that leaves main routing alone, respawns, session end, Delete history, and the Usage and Now tabs. `test/usage-view.test.mjs` covers the block by period, an open row, a narrow pane and undated records; `test/hook-band.test.mjs` the band in a subagent's transcript.
 - `experiments/mod-router/results/agent-spawn-probe.json` records what Claude Code 2.1.296 does with a spawn's model, frontmatter and workflow agents.
 - `experiments/mod-router/results/subagent-routing-live.json` is a live `on` run on 2026-10-10 with Sonnet as the parent. Explore was sent Haiku and ran on it. general-purpose was classified `standard`. A pinned project agent and an explicit `opus` call passed through. The store counted each one.
 
 When to turn it `on`:
 
-- `routed` is below `core` for the routed types, by enough to matter;
-- the choices look right for the tasks: `light` for searches and reads, `heavy` rarely;
+- **vs CC** is below zero for the routed types, by enough to matter;
+- the models look right for the tasks: Haiku for searches and reads, Opus rarely;
 - **Not routed** leaves enough routable spend to bother.
 
 Keep it if requests per agent and respawns per type stay no higher than before you turned it on. Otherwise change `types` or `heavyMass`, exclude a type with `null`, or set `subagentRouting` to `off`.

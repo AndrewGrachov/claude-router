@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SUBAGENT_PREFIX } from '../lib/subagents.mjs';
+import { modelTotals, readSubagentStore, SUBAGENT_PREFIX, summarizeSubagents } from '../lib/subagents.mjs';
 import { answering, CONFIG, drain, harness, JEV_KEY, press, screen, step } from './harness.mjs';
 import { jevResponse } from './helpers.mjs';
 
@@ -34,6 +34,11 @@ async function finish(h, agentId, model) {
 }
 
 const stored = (h) => h.preferences.get(`${SUBAGENT_PREFIX}s1`);
+const kept = (h) => summarizeSubagents(readSubagentStore(stored(h)), { from: null, to: null });
+const routedOf = (h, type) => {
+  const counts = kept(h).routed[type];
+  return { ...counts, ...modelTotals(counts), agents: counts.agents };
+};
 
 test('on, the default, spawns a listed type on its model, by full id', async () => {
   const h = await started();
@@ -41,9 +46,12 @@ test('on, the default, spawns a listed type on its model, by full id', async () 
   assert.equal(sent.model, 'claude-haiku-5-5');
   assert.equal(answer.model, 'claude-haiku-5-5');
   await finish(h, 'a1', 'claude-haiku-5-5');
-  const counts = stored(h).routed.on.Explore;
-  assert.deepEqual([counts.agents, counts.differs, counts.choices], [1, 1, { haiku: 1 }]);
-  assert.ok(counts.routedUsd < counts.coreUsd);
+  const counts = routedOf(h, 'Explore');
+  assert.deepEqual(
+    [counts.agents, counts.moved, counts.down, Object.keys(counts.models)],
+    [1, 1, 1, ['claude-haiku-5-5']],
+  );
+  assert.ok(counts.usd < counts.coreUsd);
 });
 
 const PLUGINS = '/fixture/team/plugins';
@@ -89,7 +97,7 @@ test('a fork, a workflow agent, an explicit model, a teammate, a pinned agent an
     assert.equal(sent, input, `${reason} ${input.subagentType}`);
     await finish(h, agentId, 'claude-opus-5-5');
   }
-  const { passed } = stored(h);
+  const { passed } = kept(h);
   assert.deepEqual(Object.fromEntries(Object.entries(passed).map(([reason, counts]) => [reason, counts.agents])), {
     fork: 1,
     explicit: 1,
@@ -99,7 +107,7 @@ test('a fork, a workflow agent, an explicit model, a teammate, a pinned agent an
     unknown: 1,
     unlisted: 1,
   });
-  assert.ok(passed.workflow.usd > 0);
+  assert.ok(passed.workflow.models['claude-opus-5-5'].usd > 0);
 });
 
 test('an agent that inherits, names no model or allows routing is classified from its installed definition', async () => {
@@ -111,8 +119,9 @@ test('an agent that inherits, names no model or allows routing is classified fro
   assert.equal(sent.model, 'claude-opus-5-5');
   await finish(h, 'r1', 'claude-opus-5-5');
   // Without the router the runner runs on its own Haiku: that is core's side of the comparison.
-  const runner = stored(h).routed.on['discovery:runner'];
-  assert.ok(runner.routedUsd > runner.coreUsd);
+  const runner = routedOf(h, 'discovery:runner');
+  assert.ok(runner.usd > runner.coreUsd);
+  assert.equal(runner.up, 1);
   const user = await started();
   user.files.set('/fixture/team/agents/helper.md', '---\nname: helper\n---\n');
   answering(user, HARD);
@@ -143,8 +152,8 @@ test('a classifier failure keeps core’s model and counts the failure', async (
   const { sent } = await h.spawn(input);
   assert.equal(sent, input);
   await finish(h, 'a1', 'claude-opus-5-5');
-  const counts = stored(h).routed.on['general-purpose'];
-  assert.deepEqual([counts.agents, counts.differs, counts.failures, counts.choices], [1, 0, 1, { core: 1 }]);
+  const counts = routedOf(h, 'general-purpose');
+  assert.deepEqual([counts.agents, counts.moved, counts.failures], [1, 0, 1]);
 });
 
 test('spawn failures pause only the spawn path’s classifier, never main-turn routing', async () => {
@@ -204,7 +213,7 @@ test('on waits for the classifier before the agent starts', async () => {
   release();
   await spawning;
   await finish(h, 'a1', 'claude-sonnet-5-5');
-  assert.deepEqual(stored(h).routed.on['general-purpose'].choices, { sonnet: 1 });
+  assert.deepEqual(Object.keys(routedOf(h, 'general-purpose').models), ['claude-sonnet-5-5']);
 });
 
 test('a model availableModels blocks keeps core’s model', async () => {
@@ -273,7 +282,7 @@ test('a spawn of a type its parent just finished one of counts as a respawn', as
   await h.spawn(spawnInput({ parentAgentId: 'a9' }), { model: 'claude-haiku-5-5', agentId: 'a3' });
   await finish(h, 'a2', 'claude-haiku-5-5');
   await finish(h, 'a3', 'claude-haiku-5-5');
-  const counts = stored(h).routed.on.Explore;
+  const counts = routedOf(h, 'Explore');
   assert.deepEqual([counts.agents, counts.respawns], [3, 1]);
 });
 
@@ -282,7 +291,7 @@ test('an agent still running when the session ends is counted, and Delete histor
   await h.spawn(spawnInput());
   await drain(h.step({ ...step, agentId: 'a1', model: 'claude-haiku-5-5' }));
   await h.event('session.end', { reason: 'clear', sessionId: 's1' });
-  assert.equal(stored(h).routed.on.Explore.requests, 1);
+  assert.equal(routedOf(h, 'Explore').requests, 1);
 
   const r = await started();
   await r.spawn(spawnInput());
@@ -291,27 +300,45 @@ test('an agent still running when the session ends is counted, and Delete histor
   await press(r, 'delete-history');
   await press(r, 'delete-confirm');
   assert.equal(stored(r), undefined);
-  assert.deepEqual(r.view().subagentStore.routed, { on: {} });
+  assert.deepEqual([r.view().subagentStore.days, r.view().subagentSession.days], [{}, {}]);
 });
 
-test('the Usage tab shows each routed type and the pass-throughs across sessions', async () => {
+test('Usage and Now show the session’s agents by model, who picked it, and what routing saved', async () => {
   const h = await started();
   await h.spawn(spawnInput());
-  await finish(h, 'a1', 'claude-haiku-5-5');
+  assert.equal(h.view().subagentsRunning, 1);
+  // A long agent step, so its cost and its difference from core's model show in cents.
+  const usage = { input_tokens: 20_000, cache_read_input_tokens: 400_000, cache_creation_input_tokens: 50_000 };
+  await drain(
+    h.step(
+      { ...step, turnId: 'a1-t', agentId: 'a1', model: 'claude-haiku-5-5' },
+      { usage: { ...usage, model: 'claude-haiku-5-5', output_tokens: 8_000 } },
+    ),
+  );
+  await h.event('turn.complete', { turnId: 'a1-t', agentId: 'a1' });
+  assert.equal(h.view().subagentsRunning, 0);
   await h.spawn(spawnInput({ workflow: { runId: 'wf_1', agentIndex: 1 } }), {
     model: 'claude-opus-5-5',
     agentId: 'w1',
   });
+  const now = screen(await h.render()).join('\n');
+  assert.match(now, /SUBAGENTS · this session · ● 1 running {2}\[ Usage \]/);
+  assert.match(now, /1 agent · ■ 1 moved by the router · □ 0 on Claude Code’s pick/);
   await finish(h, 'w1', 'claude-opus-5-5');
   await press(h, 'tab-usage');
   const lines = screen(await h.render());
-  const at = lines.findIndex((line) => line.startsWith('SUBAGENTS · across sessions'));
+  const at = lines.findIndex((line) => line.startsWith('SUBAGENTS · this session'));
   assert.ok(at >= 0, lines.join('\n'));
+  const block = lines.slice(at).join('\n');
   assert.match(lines[at], /subagent routing on/);
-  assert.match(
-    lines.slice(at).join('\n'),
-    /Explore {2}1 agent · 1 moved · 1\.0 req\/agent · 0 respawns · \$\d+\.\d\d → \$\d+\.\d\d/,
-  );
-  assert.match(lines.slice(at).join('\n'), /haiku 1/);
-  assert.match(lines.slice(at).join('\n'), /Not routed {2}workflow 1/);
+  assert.match(block, /■□ {2}Haiku 5\.5 1 · Opus 5\.5 1/);
+  assert.match(block, /2 agents · ■ 1 moved by the router · □ 1 on Claude Code’s pick/);
+  assert.match(block, /Routing saved \$\d+\.\d\d \(\d+%\) on 1 routed agent/);
+  assert.match(block, /▸ Explore +■ +1 +\$\d+\.\d\d +−\$\d+\.\d\d ▼/);
+  assert.match(block, /▸ workflow agent +□ +1 +\$0\.00 {2}the workflow sets it/);
+  await press(h, 'row-subagent:Explore');
+  const open = screen(await h.render()).join('\n');
+  assert.match(open, /▾ Explore/);
+  assert.match(open, /■ Haiku 5\.5 +1 moved down/);
+  assert.match(open, /1\.0 requests per agent · none respawned within 10 min/);
 });

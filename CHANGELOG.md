@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Subagents now show which model each agent ran on, who picked it, and for which period. See [Understand usage and estimates](docs/user-guide.md#understand-usage-and-estimates).
+
+### Changed
+
+- **SUBAGENTS** on the Usage tab follows the period row instead of summing every session since the last reset, and says its scope: `this session`, or `all projects` and the dates. Each agent is a square colored by the model it ran on, filled when the router moved it off Claude Code's pick. The routed types and the pass-throughs are one row each with agents, cost and the difference against Claude Code's pick, so a row no longer wraps; a row opens to its models. Each pass-through says why Claude Code picked the model.
+- The band in a subagent's transcript names the agent's model and who picked it: `■ Haiku 5.5 · moved down by the router · Claude Code: Opus 5.5`, or `□ Opus 5.5 · Claude Code’s pick: the workflow sets it`.
+- The Usage tab's scope line says `all projects` instead of `all sessions`: the records cover every project that uses this router install.
+- Subagent records are kept by day and by model, version 2 under the same `subagents:v1:<session id>` keys. Records from before this version have no date or model: Session and All add them as one line.
+
+### Added
+
+- **SUBAGENTS** on the Now tab, once this session started a subagent: how many run now, the squares, and what routing saved on them.
+
 ## 1.13.0 (2026-10-13)
 
 The Now tab shows this session and today instead of the last 30 replies, a window that matched no session, hour or day. See [Open the router pane](docs/user-guide.md#open-the-router-pane).

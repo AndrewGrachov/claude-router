@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { renderBand } from '../lib/band.mjs';
 import { loadConfig } from '../lib/config.mjs';
 import { renderPanel, routeDraftOf } from '../lib/panel.mjs';
+import { emptySubagentStore, recordAgent, spawnRecord } from '../lib/subagents.mjs';
 import { emptyUsage, mergeUsage, recordUsage, replyEntry } from '../lib/usage.mjs';
 import { addToStrip, switchView } from '../lib/view.mjs';
 
@@ -441,8 +442,56 @@ const usageStore = mergeUsage([
     [6, 21],
   ].reduce((record, [daysAgo, replies]) => usageDay(record, daysAgo, replies), emptyUsage()),
 ]);
+// Subagents over the last week, one agent each: [days ago, type or `pass:` reason, model it ran on, Claude Code's
+// pick, its cost, the same tokens on Claude Code's pick].
+const AGENT_ROWS = [
+  [0, 'Explore', 'haiku', 'opus', 0.05, 0.24],
+  [0, 'Explore', 'haiku', 'opus', 0.03, 0.17],
+  [1, 'Explore', 'haiku', 'opus', 0.06, 0.29],
+  [3, 'Explore', 'haiku', 'opus', 0.04, 0.2],
+  [0, 'dev-flow:reviewer', 'opus', 'sonnet', 1.12, 0.71],
+  [2, 'dev-flow:reviewer', 'sonnet', 'sonnet', 0.42, 0.42],
+  [4, 'dev-flow:reviewer', 'opus', 'sonnet', 0.96, 0.6],
+  [1, 'general-purpose', 'sonnet', 'opus', 0.38, 0.62],
+  [5, 'general-purpose', 'haiku', 'opus', 0.09, 0.41],
+  [0, 'pass:workflow', 'opus', 'opus', 0.48, 0],
+  [0, 'pass:workflow', 'opus', 'opus', 0.51, 0],
+  [1, 'pass:workflow', 'opus', 'opus', 0.44, 0],
+  [3, 'pass:workflow', 'opus', 'opus', 0.57, 0],
+  [0, 'pass:fork', 'opus', 'opus', 0.33, 0],
+  [2, 'pass:pinned', 'sonnet', 'sonnet', 0.12, 0],
+];
+const agentStore = (rows) =>
+  rows.reduce((store, [daysAgo, kind, model, core, usd, coreUsd]) => {
+    const pass = kind.startsWith('pass:') ? kind.slice(5) : null;
+    const [routedModel, coreModel] = [model, core].map((key) => config.models[key].id);
+    const record = spawnRecord({
+      sessionId: 'docs',
+      spawn: { subagentType: pass ? 'agent' : kind },
+      pass,
+      choice: pass ? null : model,
+      routedModel,
+      coreModel,
+      move: pass || model === core ? null : coreUsd < usd ? 'up' : 'down',
+    });
+    const agent = { ...record, requests: 6, pricedRequests: 6, actualUsd: usd, otherUsd: coreUsd };
+    return recordAgent(store, agent, NOW - daysAgo * 86_400_000);
+  }, emptySubagentStore());
+const SUBAGENTS = agentStore(AGENT_ROWS);
+// The Now tab's session: today's agents.
+const SESSION_AGENTS = agentStore(AGENT_ROWS.filter(([daysAgo]) => daysAgo === 0));
 function usagePane(props, title, desc, file) {
-  const view = { ...base, ...yours, tab: 'usage', usageSession, usageStore, savingsStore, ...props };
+  const view = {
+    ...base,
+    ...yours,
+    tab: 'usage',
+    usageSession,
+    usageStore,
+    savingsStore,
+    subagentStore: SUBAGENTS,
+    subagentSession: SUBAGENTS,
+    ...props,
+  };
   const tree = renderPanel(elements, config, view, usage, actions, {
     modelOptions: Object.keys(config.models),
     now: NOW,
@@ -455,9 +504,18 @@ function usagePane(props, title, desc, file) {
   writeFileSync(`${OUT}/${file}`, svg({ title, desc, body, w, h }));
 }
 pane(
-  { ...base, ...yours, usageSession, usageStore, strip, lastSwitch },
+  {
+    ...base,
+    ...yours,
+    usageSession,
+    usageStore,
+    strip,
+    lastSwitch,
+    subagentSession: SESSION_AGENTS,
+    subagentsRunning: 1,
+  },
   'Router pane, Now tab',
-  'What runs next turn: tier, model and activity, with the reason and the classifier support it weighed; one pin button per tier with its support; this session since its first reply, as a strip of every reply colored by tier, with the replies per tier and per activity, the last route switch and what routing saved against your model; today across sessions; today’s first finding worth a look with a link to Routes; and context, cache and cost.',
+  'What runs next turn: tier, model and activity, with the reason and the classifier support it weighed; one pin button per tier with its support; this session since its first reply, as a strip of every reply colored by tier, with the replies per tier and per activity, the last route switch and what routing saved against your model; today across sessions; this session’s subagents as squares by model, one running, with what routing saved on them; today’s first finding worth a look with a link to Routes; and context, cache and cost.',
   'router-pane-now.svg',
 );
 usagePane(

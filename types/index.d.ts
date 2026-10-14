@@ -114,8 +114,8 @@ declare module 'claude-code' {
     version: 1;
     since: number | null;
   }
-  // Subagent routing counts for one agent type in one mode (lib/subagents.mjs). `differs`: agents the decision moved off
-  // core's model; `choices`: agents by models key decided, or 'core'. USD over the priced requests.
+  // Subagent routing counts for one agent type (lib/subagents.mjs). `differs`: agents the decision moved off core's
+  // model. USD over the priced requests.
   interface RouterSubagentCounts {
     agents: number;
     differs: number;
@@ -125,7 +125,8 @@ declare module 'claude-code' {
     routedUsd: number;
     respawns: number;
     failures: number;
-    choices: Record<string, number>;
+    // Agents by the model id they ran on; in `undated`, by the models key decided ('core': Claude Code's model).
+    models: Record<string, number>;
   }
   // Spawns that passed through for one reason, priced on the model they ran on.
   interface RouterSubagentPassed {
@@ -133,14 +134,22 @@ declare module 'claude-code' {
     requests: number;
     pricedRequests: number;
     usd: number;
+    models: Record<string, number>;
   }
-  // Kept across sessions, one per session under store key 'subagents:v1:<session id>' or their sum in the view, since
-  // the first agent after the last reset (ms).
+  // One local calendar day of subagents: routed types and pass-throughs by reason.
+  interface RouterSubagentDay {
+    routed: Record<string, RouterSubagentCounts>;
+    passed: Partial<
+      Record<'fork' | 'workflow' | 'explicit' | 'teammate' | 'unlisted' | 'pinned' | 'unknown', RouterSubagentPassed>
+    >;
+  }
+  // Kept across sessions, one per session under store key 'subagents:v1:<session id>' or their sum in the view, by day
+  // ('2026-10-13'), since the first agent after the last reset (ms). `undated` holds a record from before 1.14.0.
   interface RouterSubagentStore {
-    version: 1;
+    version: 2;
     since: number | null;
-    routed: { on: Record<string, RouterSubagentCounts> };
-    passed: Partial<Record<'fork' | 'explicit' | 'teammate' | 'workflow' | 'unlisted', RouterSubagentPassed>>;
+    days: Record<string, RouterSubagentDay>;
+    undated?: RouterSubagentDay;
   }
   // One local calendar day of routed replies (lib/usage.mjs). `cells` by 'activity|tier|modelId@effort' hold, in order,
   // replies, routedUsd, yoursUsd, cheaperUsd, strongerUsd, switchUsd, inputTokens, cacheReadTokens, outputTokens.
@@ -213,7 +222,9 @@ declare module 'claude-code' {
     activityMetrics?: RouterActivityMetrics | null;
     savings?: RouterSavingsSession | null;
     savingsStore?: RouterSavingsStore | null;
+    // Every session's subagent records as last read or written, and this session's own.
     subagentStore?: RouterSubagentStore | null;
+    subagentSession?: RouterSubagentStore | null;
     // Every session's usage records as last read or written, and this session's own.
     usageStore?: RouterUsageStore | null;
     usageSession?: RouterUsageStore | null;

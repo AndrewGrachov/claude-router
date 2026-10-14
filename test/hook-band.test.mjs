@@ -36,6 +36,29 @@ test('the band yields to a survey and says how a subagent got its model', async 
   assert.match((await band(off, { view: { agentId: 'a1' } })).line, /subagents keep their own model/);
 });
 
+test('in a subagent’s transcript the band names its model and who picked it', async () => {
+  const h = harness();
+  await start(h);
+  const spawn = (extra) => ({
+    tool_use_id: 'toolu_1',
+    prompt: 'Find where the cache key is built.',
+    subagentType: 'Explore',
+    provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5',
+    fork: false,
+    ...extra,
+  });
+  await h.spawn(spawn(), { model: 'claude-haiku-5-5', agentId: 'a1' });
+  await h.spawn(spawn({ workflow: { runId: 'wf_1', agentIndex: 1 } }), { model: 'claude-opus-5-5', agentId: 'w1' });
+  const routed = (columns) => band(h, { view: { agentId: 'a1' }, bodyColumns: columns });
+  assert.equal((await routed(120)).line, '○ Router · ■ Haiku 5.5 · moved down by the router · Claude Code: Opus 5.5');
+  assert.equal((await routed(50)).line, '○ Router · ■ Haiku 5.5 · moved down by the router');
+  assert.equal(
+    (await band(h, { view: { agentId: 'w1' } })).line,
+    '○ Router · □ Opus 5.5 · Claude Code’s pick: the workflow sets it',
+  );
+});
+
 test('the band offers Routing on in Manual mode and a key button without a key', async () => {
   const h = harness();
   await start(h);

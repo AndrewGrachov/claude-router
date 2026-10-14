@@ -93,6 +93,7 @@ import {
   emptySubagentStore,
   flushedAgent,
   mergeSubagentStores,
+  moveOf,
   passReason,
   RESPAWN_WINDOW_MS,
   readSubagentStore,
@@ -172,6 +173,7 @@ const LEDGERS = {
   subagents: {
     prefix: SUBAGENT_PREFIX,
     field: 'subagentStore',
+    ownField: 'subagentSession',
     read: readSubagentStore,
     afterReset: subagentsAfterReset,
     merge: mergeSubagentStores,
@@ -231,8 +233,8 @@ function createRouter(options) {
     // first request goes out on that route, unless it was pressed again meanwhile.
     pinPresses: 0,
     turnPins: new Map(),
-    // Each spawned agent's record by agentId (spawnRecord), and when each parent loop last finished an agent of a type,
-    // for respawns.
+    // Each spawned agent's record by agentId (spawnRecord, `running` between its steps and its turn's end), and when
+    // each parent loop last finished an agent of a type, for respawns.
     agents: new Map(),
     finished: new Map(),
     // Each agent type's definition frontmatter by provider and type, read once per session (agentDefinition).
@@ -1192,17 +1194,27 @@ async function noteSpawn($, router, { cfg, e, pass, decision, routed, result, de
         definition,
       })
     : result.model;
+  const routedModel = decision?.model ?? result.model;
   const record = spawnRecord({
     sessionId: await $.session.id(),
     spawn: e,
     pass,
     choice: decision?.choice ?? null,
-    routedModel: decision?.model ?? result.model,
+    routedModel,
     coreModel,
+    move: routed ? moveOf(cfg, routedModel, coreModel) : null,
     failed: decision?.failed,
     respawn: Number.isFinite(finishedAt) && Date.now() - finishedAt < RESPAWN_WINDOW_MS,
   });
-  router.agents.set(result.agentId, { ...record, parentKey });
+  router.agents.set(result.agentId, { ...record, parentKey, running: true });
+  await showRunning($, router);
+}
+
+// How many of the agents with a record are between their start or a step and their turn's end, in the view when it
+// changes. An agent spawned with routing off has no record and is not counted.
+async function showRunning($, router) {
+  const running = [...router.agents.values()].filter((agent) => agent.running).length;
+  if ((router.view?.subagentsRunning ?? 0) !== running) await updateView($, router, { subagentsRunning: running });
 }
 
 // A subagent's prompt-cache lifetime, by Claude Code's rule for requests outside the main conversation.
@@ -1224,7 +1236,9 @@ async function* stepAgent($, router, e, next) {
     try {
       const ttl = await subagentTtlOf($);
       const agent = router.agents.get(e.agentId);
-      if (agent) router.agents.set(e.agentId, addAgentReply(router.config, agent, response.usage, ttl));
+      if (agent)
+        router.agents.set(e.agentId, { ...addAgentReply(router.config, agent, response.usage, ttl), running: true });
+      if (agent && !agent.running) await showRunning($, router);
     } catch {}
   }
   return response;
@@ -1235,7 +1249,8 @@ async function finishAgent($, router, agentId) {
   const agent = router.agents.get(agentId);
   if (!agent) return;
   router.finished.set(agent.parentKey, Date.now());
-  router.agents.set(agentId, flushedAgent(agent));
+  router.agents.set(agentId, { ...flushedAgent(agent), running: false });
+  await showRunning($, router).catch(() => {});
   await flushSubagents($, router, [agent]);
 }
 
@@ -1797,7 +1812,11 @@ export function register(on, options) {
             router.config,
             view,
             usage,
-            { columns: e.props.bodyColumns, agentId: e.props.view?.agentId },
+            {
+              columns: e.props.bodyColumns,
+              agentId: e.props.view?.agentId,
+              agent: router.agents.get(e.props.view?.agentId) ?? null,
+            },
             {
               open: () => openPane($, router),
               mode: (mode) => changeMode($, router, mode),

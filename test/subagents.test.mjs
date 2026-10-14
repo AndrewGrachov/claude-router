@@ -10,12 +10,15 @@ import {
   emptySubagentStore,
   flushedAgent,
   mergeSubagentStores,
+  modelTotals,
+  moveOf,
   passReason,
   readSubagentStore,
   recordAgent,
   spawnPrompt,
   spawnRecord,
   subagentsAfterReset,
+  summarizeSubagents,
   typeRoute,
 } from '../lib/subagents.mjs';
 import { advice } from './helpers.mjs';
@@ -231,60 +234,105 @@ test('a reply without a price or with incomplete usage is counted as a request a
   assert.equal(unpricedOther.pricedRequests, 0);
 });
 
-test('an agent counts once across flushes, and its requests and prices each time', () => {
-  let agent = addAgentReply(DEFAULTS, record({ respawn: true }), usage('claude-haiku-5-5'), '5m');
-  let store = recordAgent(emptySubagentStore(), agent, 1_000);
+const AT = (day, hour = 12) => new Date(2026, 9, day, hour).getTime();
+const whole = (store) => summarizeSubagents(readSubagentStore(store), { from: null, to: null });
+
+test('the router’s move is up or down by output price, plain when either has no price, none for the same model', () => {
+  const cases = [
+    ['claude-opus-5-5', 'claude-sonnet-5-5', 'up'],
+    ['claude-haiku-5-5', 'claude-opus-5-5', 'down'],
+    ['claude-haiku-5-5', 'gpt-x', 'moved'],
+    ['claude-haiku-5-5', 'claude-haiku-5-5', null],
+    ['claude-haiku-5-5', undefined, null],
+  ];
+  for (const [routed, core, move] of cases) assert.equal(moveOf(DEFAULTS, routed, core), move, `${routed} ${core}`);
+});
+
+test('an agent counts once across flushes, on the model it ran on, its prices on the day of each flush', () => {
+  let agent = addAgentReply(DEFAULTS, record({ respawn: true, move: 'down' }), usage('claude-haiku-5-5'), '5m');
+  let store = recordAgent(emptySubagentStore(), agent, AT(12));
   agent = addAgentReply(DEFAULTS, flushedAgent(agent), usage('claude-haiku-5-5'), '5m');
-  store = recordAgent(store, agent, 2_000);
-  assert.equal(recordAgent(store, flushedAgent(agent), 3_000), store);
-  const counts = store.routed.on.Explore;
+  store = recordAgent(store, agent, AT(13));
+  assert.equal(recordAgent(store, flushedAgent(agent), AT(13)), store);
+  assert.deepEqual(Object.keys(store.days), ['2026-10-12', '2026-10-13']);
+  const counts = whole(store).routed.Explore;
   assert.deepEqual(
-    [counts.agents, counts.differs, counts.requests, counts.respawns, counts.failures, counts.choices],
-    [1, 1, 2, 1, 0, { haiku: 1 }],
+    [counts.agents, counts.requests, counts.respawns, counts.failures, Object.keys(counts.models)],
+    [1, 2, 1, 0, ['claude-haiku-5-5']],
   );
-  assert.ok(counts.coreUsd > counts.routedUsd);
-  assert.equal(store.since, 1_000);
+  const haiku = counts.models['claude-haiku-5-5'];
+  assert.deepEqual([haiku.agents, haiku.moved, haiku.up, haiku.down], [1, 1, 0, 1]);
+  assert.ok(haiku.coreUsd > haiku.usd);
+  assert.deepEqual(modelTotals(counts), { ...haiku });
+  assert.equal(store.since, AT(12));
+  const today = summarizeSubagents(store, { from: '2026-10-13', to: '2026-10-13' });
+  assert.equal(today.routed.Explore.agents, 0);
+  assert.equal(today.routed.Explore.requests, 1);
+  assert.deepEqual(whole(store).perDay, [
+    ['2026-10-12', 1],
+    ['2026-10-13', 0],
+  ]);
 });
 
 test('a decision that kept core’s model does not count as moved, and a classifier failure is counted', () => {
   const kept = record({ choice: 'core', routedModel: 'claude-opus-5-5', failed: true });
-  const counts = recordAgent(emptySubagentStore(), kept, 1).routed.on.Explore;
-  assert.deepEqual([counts.agents, counts.differs, counts.failures, counts.choices], [1, 0, 1, { core: 1 }]);
+  const counts = whole(recordAgent(emptySubagentStore(), kept, AT(13))).routed.Explore;
+  assert.deepEqual([counts.agents, counts.failures, modelTotals(counts).moved], [1, 1, 0]);
 });
 
-test('pass-throughs count by reason, and stores merge, reset and read back from bad values', () => {
+test('pass-throughs count by reason and model; stores merge by day, reset and read back from bad values', () => {
   const passed = { ...record({ pass: 'workflow', choice: null }), requests: 3, pricedRequests: 3, actualUsd: 0.5 };
-  const one = recordAgent(emptySubagentStore(), passed, 10);
-  const two = recordAgent(recordAgent(emptySubagentStore(), record(), 20), passed, 20);
+  const one = recordAgent(emptySubagentStore(), passed, AT(12));
+  const two = recordAgent(recordAgent(emptySubagentStore(), record(), AT(13)), passed, AT(13));
   const merged = mergeSubagentStores([one, two, null, { version: 9 }]);
-  assert.deepEqual(merged.passed.workflow, { agents: 2, requests: 6, pricedRequests: 6, usd: 1 });
-  assert.equal(merged.routed.on.Explore.agents, 1);
-  assert.equal(merged.since, 10);
-  assert.equal(mergeSubagentStores([one, two], 15).passed.workflow.agents, 1);
-  assert.deepEqual(subagentsAfterReset(one, 15), emptySubagentStore());
-  assert.equal(subagentsAfterReset(one, 5), one);
+  const workflow = whole(merged).passed.workflow;
+  assert.deepEqual([workflow.agents, workflow.requests], [2, 6]);
+  assert.deepEqual(workflow.models['claude-haiku-5-5'], { agents: 2, usd: 1 });
+  assert.equal(whole(merged).routed.Explore.agents, 1);
+  assert.equal(merged.since, AT(12));
+  assert.equal(whole(mergeSubagentStores([one, two], AT(12, 18))).passed.workflow.agents, 1);
+  assert.deepEqual(subagentsAfterReset(one, AT(12, 18)), emptySubagentStore());
+  assert.equal(subagentsAfterReset(one, AT(11)), one);
   const bad = {
-    ...one,
-    passed: { workflow: { agents: -1 }, fork: 'x' },
-    routed: { on: { Explore: { agents: 1 } } },
+    ...two,
+    days: {
+      ...two.days,
+      '2026-10-14': 'x',
+      tomorrow: two.days['2026-10-13'],
+      '2026-10-12': { routed: { Explore: { agents: 1, models: {} } }, passed: { fork: { agents: -1 } } },
+    },
   };
-  assert.deepEqual(readSubagentStore(bad), { version: 1, since: 10, routed: { on: {} }, passed: {} });
+  const read = readSubagentStore(bad);
+  assert.deepEqual(Object.keys(read.days).sort(), ['2026-10-12', '2026-10-13']);
+  assert.deepEqual(read.days['2026-10-12'], { routed: {}, passed: {} });
+  assert.deepEqual(read.days['2026-10-13'], two.days['2026-10-13']);
   assert.deepEqual(readSubagentStore('junk'), emptySubagentStore());
 });
 
-test('a store saved before 1.10.1 keeps its routed counts and drops the shadow ones', () => {
-  const counts = {
-    agents: 2,
-    differs: 1,
-    requests: 4,
-    pricedRequests: 4,
-    coreUsd: 1,
-    routedUsd: 0.5,
-    respawns: 0,
-    failures: 0,
+test('a model id from the store never reaches the prototype', () => {
+  const agent = record({ routedModel: '__proto__' });
+  const store = JSON.parse(JSON.stringify(recordAgent(emptySubagentStore(), agent, AT(13))));
+  const counts = whole(store).routed.Explore;
+  assert.equal(Object.hasOwn(counts.models, '__proto__'), true);
+  assert.equal(Object.getPrototypeOf(counts.models), Object.prototype);
+});
+
+test('a record from before 1.14.0 reads as undated totals that only a whole-record summary counts', () => {
+  const counts = { agents: 2, differs: 1, requests: 4, pricedRequests: 4, coreUsd: 1, routedUsd: 0.5 };
+  const saved = {
+    version: 1,
+    since: AT(10),
+    routed: {
+      shadow: { Plan: counts },
+      on: { Explore: { ...counts, respawns: 0, failures: 0, choices: { haiku: 2 } } },
+    },
+    passed: { fork: { agents: 3, requests: 9, pricedRequests: 9, usd: 2 } },
   };
-  const saved = { version: 1, since: 10, routed: { shadow: { Plan: counts }, on: { Explore: counts } }, passed: {} };
   const read = readSubagentStore(saved);
-  assert.deepEqual(read.routed, { on: { Explore: { ...counts, choices: {} } } });
-  assert.deepEqual(mergeSubagentStores([saved]).routed, read.routed);
+  assert.deepEqual(read, { version: 2, since: AT(10), days: {}, undated: { agents: 5, usd: 2.5 } });
+  assert.deepEqual(whole(saved).undated, { agents: 5, usd: 2.5 });
+  assert.equal(summarizeSubagents(read, { from: '2026-10-13', to: '2026-10-13' }).undated, null);
+  const next = recordAgent(read, record(), AT(13));
+  assert.deepEqual(next.undated, { agents: 5, usd: 2.5 });
+  assert.deepEqual(mergeSubagentStores([saved, next]).undated, { agents: 10, usd: 5 });
 });

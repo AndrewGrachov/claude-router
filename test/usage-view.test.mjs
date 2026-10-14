@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULTS } from '../lib/config.mjs';
 import { renderPanel } from '../lib/panel.mjs';
+import {
+  emptySubagentStore,
+  mergeSubagentStores,
+  PASS_LABEL,
+  PASS_REASONS,
+  recordAgent,
+  spawnRecord,
+} from '../lib/subagents.mjs';
 import { recordUsage } from '../lib/usage.mjs';
 import { controls, ELEMENTS, screen } from './harness.mjs';
 import { at, NOW, OTHER, reply, SESSION, STORE } from './usage-fixtures.mjs';
@@ -78,11 +86,11 @@ test('the period row offers six periods, marks the one shown, and p presses the 
 test('the scope line says whose replies the period holds and what each is compared with', () => {
   for (const [period, expected] of [
     ['session', 'this session · your model Opus 5.5 · xhigh'],
-    ['today', 'all sessions · today, Oct 13 · each session vs its own model'],
-    ['7d', 'all sessions · Oct 7 – Oct 13 · each session vs its own model'],
-    ['30d', 'all sessions · Sep 14 – Oct 13 · each session vs its own model'],
-    ['month', 'all sessions · Oct 1 – Oct 13 · each session vs its own model'],
-    ['all', 'all sessions · since Oct 1 · each session vs its own model'],
+    ['today', 'all projects · today, Oct 13 · each session vs its own model'],
+    ['7d', 'all projects · Oct 7 – Oct 13 · each session vs its own model'],
+    ['30d', 'all projects · Sep 14 – Oct 13 · each session vs its own model'],
+    ['month', 'all projects · Oct 1 – Oct 13 · each session vs its own model'],
+    ['all', 'all projects · since Oct 1 · each session vs its own model'],
   ])
     assert.equal(lines({ usagePeriod: period })[4], expected, period);
 });
@@ -282,4 +290,108 @@ test('Delete history asks once more before every session’s records go', () => 
     .find((c) => c.key === 'delete-confirm')
     .onPress();
   assert.deepEqual(calls, [['confirmDelete', true], ['confirmDelete', false], ['resetStats']]);
+});
+
+// Subagent records for the Usage tab: `[day, type or pass reason, model, core model]` per agent, one flush each.
+function agentStore(agents) {
+  let store = emptySubagentStore();
+  for (const [day, kind, model, core] of agents) {
+    const pass = kind.startsWith('pass:') ? kind.slice(5) : null;
+    const agent = {
+      ...spawnRecord({
+        sessionId: 's1',
+        spawn: { subagentType: pass ? 'x' : kind },
+        pass,
+        choice: pass ? null : 'haiku',
+        routedModel: model,
+        coreModel: core,
+        move: model === core || pass ? null : model.includes('opus') ? 'up' : 'down',
+      }),
+      requests: 2,
+      pricedRequests: 2,
+      actualUsd: model.includes('opus') ? 0.5 : 0.1,
+      otherUsd: pass ? 0 : model === core ? 0.1 : core.includes('opus') ? 0.5 : 0.2,
+    };
+    store = recordAgent(store, agent, at(2026, 10, day));
+  }
+  return store;
+}
+const AGENTS = agentStore([
+  [9, 'Explore', 'claude-haiku-5-5', 'claude-opus-5-5'],
+  [11, 'Explore', 'claude-haiku-5-5', 'claude-opus-5-5'],
+  [13, 'Explore', 'claude-haiku-5-5', 'claude-opus-5-5'],
+  [13, 'dev-flow:reviewer', 'claude-opus-5-5', 'claude-sonnet-5-5'],
+  [13, 'dev-flow:reviewer', 'claude-sonnet-5-5', 'claude-sonnet-5-5'],
+  [13, 'pass:workflow', 'claude-opus-5-5', null],
+]);
+const agentLines = (period, props = {}, options = {}) => {
+  const all = lines({ usagePeriod: period, subagentStore: AGENTS, subagentSession: AGENTS, ...props }, options);
+  const from = all.findIndex((line) => line.startsWith('SUBAGENTS'));
+  return all.slice(from, all.indexOf('', from + 4) + 1 || undefined);
+};
+
+test('the subagent block follows the period, with a strip by model, the verdict and a table by type', () => {
+  const today = agentLines('today');
+  assert.equal(today[0], 'SUBAGENTS · all projects · today, Oct 13   subagent routing on');
+  assert.equal(today[1], '  ■□■□  Haiku 5.5 1 · Sonnet 5.5 1 · Opus 5.5 2');
+  assert.equal(today[2], '  4 agents · ■ 2 moved by the router · □ 2 on Claude Code’s pick');
+  assert.equal(today[3], '  Routing saved $0.10 (13%) on 3 routed agents');
+  const table = lines({ usagePeriod: 'today', subagentStore: AGENTS });
+  assert.ok(table.includes('  ▸ dev-flow:reviewer  □■            2    $0.60   +$0.30 ▲'), table.join('\n'));
+  assert.ok(table.includes('  ▸ Explore            ■             1    $0.10   −$0.40 ▼'));
+  assert.ok(table.includes('  ▸ workflow agent     □             1    $0.50  the workflow sets it'));
+  const week = agentLines('7d');
+  assert.equal(week[0], 'SUBAGENTS · all projects · Oct 7 – Oct 13   subagent routing on');
+  assert.equal(week[2], '  6 agents · ■ 4 moved by the router · □ 2 on Claude Code’s pick');
+  assert.equal(week[4], '  per day ▁▁▃▁▃▁█  peak 4 on Oct 13');
+});
+
+test('an open subagent row splits its agents and cost by model and lists its requests', () => {
+  const open = lines({ usagePeriod: 'today', subagentStore: AGENTS, usageOpen: 'subagent:dev-flow:reviewer' });
+  const at_ = open.findIndex((line) => line.startsWith('  ▾ dev-flow:reviewer'));
+  assert.ok(at_ >= 0, open.join('\n'));
+  assert.deepEqual(open.slice(at_ + 1, at_ + 4), [
+    '      □ Sonnet 5.5     1 kept             $0.10        —',
+    '      ■ Opus 5.5       1 moved up         $0.50   +$0.30 ▲',
+    '      2.0 requests per agent · none respawned within 10 min',
+  ]);
+});
+
+test('a narrow pane drops the cost column and the reasons, and moves the model names under the strip', () => {
+  const narrow = agentLines('today', {}, { columns: 40 });
+  assert.equal(narrow[1], '  ■□■□');
+  assert.equal(narrow[2], '  Haiku 5.5 1 · Sonnet 5.5 1 · Opus 5.5 2');
+  const table = lines({ usagePeriod: 'today', subagentStore: AGENTS }, { columns: 50 });
+  assert.ok(table.includes('  ▸ Explore            ■             1   −$0.40 ▼'), table.join('\n'));
+  assert.ok(table.includes('  ▸ workflow agent     □             1'));
+});
+
+test('records from before 1.14.0 show under All and Session only, and an empty period says where they are', () => {
+  const old = {
+    version: 1,
+    since: 1,
+    routed: { on: {} },
+    passed: { fork: { agents: 3, requests: 9, pricedRequests: 9, usd: 2 } },
+  };
+  const store = mergeSubagentStores([old]);
+  assert.deepEqual(agentLines('today', { subagentStore: store }).slice(1, 3), [
+    '  No subagents today.',
+    '  Agents from before 1.14.0 have no date: All shows them.',
+  ]);
+  assert.deepEqual(agentLines('all', { subagentStore: store }).slice(1, 3), [
+    '  No subagents yet.',
+    '  + 3 agents from before 1.14.0, not split by model · $2.00',
+  ]);
+  const off = lines({ usagePeriod: 'today', subagentStore: null }, {});
+  assert.ok(off.includes('  No subagents today.'));
+});
+
+test('every pass-through reason fits its row unclipped', () => {
+  const store = agentStore(PASS_REASONS.map((reason) => [13, `pass:${reason}`, 'claude-opus-5-5', null]));
+  const all = lines({ usagePeriod: 'today', subagentStore: store });
+  for (const reason of PASS_REASONS)
+    assert.ok(
+      all.some((line) => line.startsWith(`  ▸ ${PASS_LABEL[reason]} `)),
+      `${reason}: ${all.join('\n')}`,
+    );
 });
