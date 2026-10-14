@@ -1,0 +1,56 @@
+test/hook-credentials.test.mjs
+  s_a9c9833c1f3ee7::t_cc550695ef6adf 130-164
+  s_a9c9833c1f3ee7::t_7f54a9e2531c3c 165-199
+hooks/native-router.mjs
+  s_a9c9833c1f3ee7::t_0c1eb07a21c68a 484
+  s_a9c9833c1f3ee7::t_badbb69899e2dd 483,499-501
+test/hook-subagents.test.mjs
+  s_a9c9833c1f3ee7::t_9806cbaf282c97 148-177
+docs/user-guide.md
+  s_a9c9833c1f3ee7::t_ee501b343c2dce 26,284
+  s_a9c9833c1f3ee7::t_9ddaac4cc5d307 285
+.claude-plugin/plugin.json
+  s_a9c9833c1f3ee7::t_0c1eb07a21c68a 36-41
+  s_a9c9833c1f3ee7::t_ee501b343c2dce 12
+test/config.test.mjs
+  s_a9c9833c1f3ee7::t_8cb3c569dcb086 111-115,396-415
+  s_a9c9833c1f3ee7::t_bec043d4364f51 416-417
+lib/config.mjs
+  s_a9c9833c1f3ee7::t_badbb69899e2dd 133,196,207,209-210,620-628
+lib/classifier-client.mjs
+  s_a9c9833c1f3ee7::t_badbb69899e2dd 14-15,73,138,142
+scripts/probe-classifier.mjs
+  s_a9c9833c1f3ee7::t_0c1eb07a21c68a 3,10,15-16,27,39
+CHANGELOG.md
+  s_a9c9833c1f3ee7::t_31b7e2ae8b801a 3-9
+docs/configuration.md
+  s_a9c9833c1f3ee7::t_f8d0357c23ec0b 169-197
+  s_a9c9833c1f3ee7::t_31b7e2ae8b801a 146,148
+  s_a9c9833c1f3ee7::t_ee501b343c2dce 18,26,167
+  s_a9c9833c1f3ee7::t_ac8565c9cfe9f5 168
+scripts/probe-activity.mjs
+  s_a9c9833c1f3ee7::t_0c1eb07a21c68a 13,19-20,32,42
+README.md
+  s_a9c9833c1f3ee7::t_31b7e2ae8b801a 22
+docs/architecture.md
+  s_a9c9833c1f3ee7::t_ee501b343c2dce 33
+test/classifier-client.test.mjs
+  s_a9c9833c1f3ee7::t_93f2412d9d9edf 112-134
+  s_a9c9833c1f3ee7::t_8cb3c569dcb086 94-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5b425bcd9d214f7caaa5d1fea00f4b350da97887",
+  "prompts": {},
+  "sessions": {
+    "s_a9c9833c1f3ee7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3adaf190-055f-4580-840a-012d08ca1cde",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrii Hrachov <andrii.hrachov@deliveryhero.com>"
+    }
+  }
+}
