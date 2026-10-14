@@ -51,7 +51,9 @@ const response = await fetch(credentials.endpoint, {
 const ms = Date.now() - started;
 const text = await response.text();
 const host = new URL(credentials.endpoint).host;
-console.log(`${id} (${credentials.model}) at ${host}: HTTP ${response.status} in ${ms} ms, deadline ${entry.timeoutMs} ms`);
+console.log(
+  `${id} (${credentials.model}) at ${host}: HTTP ${response.status} in ${ms} ms, deadline ${entry.timeoutMs} ms`,
+);
 try {
   console.log(JSON.stringify(parseAnswers(config, JSON.parse(text)), null, 2));
 } catch (error) {
