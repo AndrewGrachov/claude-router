@@ -86,7 +86,7 @@ for (const [index, { text, dialogue = [], expected }] of probes.entries()) {
 latencies.sort((a, b) => a - b);
 const result = {
   classifier: id,
-  model: entry.model,
+  model: credentials.model,
   api: entry.api,
   date: new Date().toISOString(),
   probes: probes.length,
@@ -108,7 +108,7 @@ const out = join(dir, `activity-probe-${id}.json`);
 writeFileSync(out, `${JSON.stringify(result, null, 2)}\n`);
 const host = new URL(credentials.endpoint).host;
 console.log(
-  `\n${id} (${entry.model}) at ${host}: ${correct}/${probes.length} correct (${(result.accuracy * 100).toFixed(1)}%), ` +
+  `\n${id} (${credentials.model}) at ${host}: ${correct}/${probes.length} correct (${(result.accuracy * 100).toFixed(1)}%), ` +
     `p50 ${result.latencyMs.p50} ms, p95 ${result.latencyMs.p95} ms, deadline ${entry.timeoutMs} ms`,
 );
 console.log(`wrote ${out}`);
