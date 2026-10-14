@@ -34,10 +34,20 @@
       "description": "OpenAI API key for the gpt-6-luna classifier. Used only when the classifier is OpenAI; the bounded prompt text then goes to OpenAI. Ollama needs no key.",
       "sensitive": true
     },
+    "gateway_url": {
+      "type": "string",
+      "title": "LLM gateway URL (Gateway classifier)",
+      "description": "Base URL of your LLM gateway, such as a LiteLLM proxy: https://litellm.example.com. https only, or http on localhost. The bounded prompt text goes to this host when the classifier is Gateway. Not a secret."
+    },
+    "gateway_model": {
+      "type": "string",
+      "title": "LLM gateway model (Gateway classifier)",
+      "description": "The decision model name your gateway serves, such as a LiteLLM model_name alias (jev) or a provider model (typesafe/jev-latest, cloudflare/clef-flash). Not a secret."
+    },
     "gateway_api_key": {
       "type": "string",
-      "title": "LLM gateway API key (LiteLLM)",
-      "description": "Key for a classifier entry in router.json that points at your own gateway, such as a LiteLLM proxy. The bounded prompt text then goes to that gateway's host.",
+      "title": "LLM gateway API key (Gateway classifier)",
+      "description": "The key your gateway takes, sent as a bearer token. Used when the classifier is Gateway, or a router.json entry that names gateway_api_key.",
       "sensitive": true
     }
   },

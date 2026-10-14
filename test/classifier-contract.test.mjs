@@ -57,39 +57,94 @@ test('a classifier with no key option reads its endpoint without a key', async (
   assert.deepEqual(await resolveCredentials(ollama, async () => 'ignored'), {
     apiKey: null,
     endpoint: ollama.endpoint,
+    model: ollama.model,
     missing: null,
   });
+});
+
+test('the Gateway classifier builds its endpoint and model from the gateway settings', async () => {
+  const { gateway } = DEFAULTS.classifiers;
+  const ready = (endpoint, model = 'jev') => ({ apiKey: 'k', endpoint, model, missing: null });
+  const notReady = (missing, apiKey = 'k') => ({ apiKey, endpoint: null, model: null, missing });
+  for (const [name, settings, expected] of [
+    [
+      'a base URL',
+      { gateway_api_key: 'k', gateway_url: 'https://gw.example', gateway_model: 'jev' },
+      ready('https://gw.example/v1/systemone'),
+    ],
+    [
+      'a trailing slash and /v1 are dropped',
+      { gateway_api_key: 'k', gateway_url: 'https://gw.example/llm/v1/', gateway_model: 'jev' },
+      ready('https://gw.example/llm/v1/systemone'),
+    ],
+    [
+      'a provider model is sent as written',
+      { gateway_api_key: 'k', gateway_url: 'https://gw.example', gateway_model: 'cloudflare/clef-flash' },
+      ready('https://gw.example/v1/systemone', 'cloudflare/clef-flash'),
+    ],
+    [
+      'plain http on this machine',
+      { gateway_api_key: 'k', gateway_url: 'http://127.0.0.1:4000', gateway_model: 'jev' },
+      ready('http://127.0.0.1:4000/v1/systemone'),
+    ],
+    ['no key', { gateway_url: 'https://gw.example', gateway_model: 'jev' }, notReady('missing-key', null)],
+    ['no URL', { gateway_api_key: 'k', gateway_model: 'jev' }, notReady('missing-account')],
+    ['no model', { gateway_api_key: 'k', gateway_url: 'https://gw.example' }, notReady('missing-account')],
+    [
+      'cleartext off this machine',
+      { gateway_api_key: 'k', gateway_url: 'http://gw.example', gateway_model: 'jev' },
+      notReady('bad-url'),
+    ],
+    [
+      'a URL with user info',
+      { gateway_api_key: 'k', gateway_url: 'https://user:pw@gw.example', gateway_model: 'jev' },
+      notReady('bad-url'),
+    ],
+    [
+      'a URL with a query',
+      { gateway_api_key: 'k', gateway_url: 'https://gw.example/?x=1', gateway_model: 'jev' },
+      notReady('bad-url'),
+    ],
+    ['not a URL', { gateway_api_key: 'k', gateway_url: 'gw.example', gateway_model: 'jev' }, notReady('bad-url')],
+  ]) {
+    assert.deepEqual(await resolveCredentials(gateway, async (option) => settings[option]), expected, name);
+  }
 });
 
 test('credentials fill endpoint settings and report what is missing, key first', async () => {
   const { jev, clef } = DEFAULTS.classifiers;
   const cloudflare = (account) => `https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/@cf/cloudflare/clef`;
   for (const [name, entry, settings, expected] of [
-    ['Jev with its key', jev, { typesafe_api_key: 'k' }, { apiKey: 'k', endpoint: jev.endpoint, missing: null }],
+    [
+      'Jev with its key',
+      jev,
+      { typesafe_api_key: 'k' },
+      { apiKey: 'k', endpoint: jev.endpoint, model: jev.model, missing: null },
+    ],
     [
       'Jev without a key',
       jev,
       { cloudflare_api_token: 't' },
-      { apiKey: null, endpoint: jev.endpoint, missing: 'missing-key' },
+      { apiKey: null, endpoint: null, model: null, missing: 'missing-key' },
     ],
     [
       'Clef with token and account',
       clef,
       { cloudflare_api_token: 't', cloudflare_account_id: 'abc123' },
-      { apiKey: 't', endpoint: cloudflare('abc123'), missing: null },
+      { apiKey: 't', endpoint: cloudflare('abc123'), model: clef.model, missing: null },
     ],
     [
       'Clef without an account',
       clef,
       { cloudflare_api_token: 't' },
-      { apiKey: 't', endpoint: null, missing: 'missing-account' },
+      { apiKey: 't', endpoint: null, model: null, missing: 'missing-account' },
     ],
-    ['Clef with nothing', clef, {}, { apiKey: null, endpoint: null, missing: 'missing-key' }],
+    ['Clef with nothing', clef, {}, { apiKey: null, endpoint: null, model: null, missing: 'missing-key' }],
     [
       'an account that would change the path',
       clef,
       { cloudflare_api_token: 't', cloudflare_account_id: '../x?y' },
-      { apiKey: 't', endpoint: cloudflare('..%2Fx%3Fy'), missing: null },
+      { apiKey: 't', endpoint: cloudflare('..%2Fx%3Fy'), model: clef.model, missing: null },
     ],
   ]) {
     assert.deepEqual(await resolveCredentials(entry, async (option) => settings[option]), expected, name);

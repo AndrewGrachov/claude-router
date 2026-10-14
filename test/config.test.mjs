@@ -10,6 +10,7 @@ import {
   DEFAULTS,
   editActivity,
   effectiveActivities,
+  gatewayBase,
   loadConfig,
   resolveRoute,
   supportedVersion,
@@ -28,7 +29,15 @@ test('defaults load without a user file, with Jev as the classifier', () => {
   assert.deepEqual(config.routes.low, { model: 'haiku', effort: 'high' });
   assert.equal(config.baselineTier, 'low');
   assert.equal(config.classifier, 'jev');
-  assert.deepEqual(Object.keys(config.classifiers), ['jev', 'clef', 'clef-flash', 'clef-omni', 'openai', 'ollama']);
+  assert.deepEqual(Object.keys(config.classifiers), [
+    'jev',
+    'clef',
+    'clef-flash',
+    'clef-omni',
+    'openai',
+    'gateway',
+    'ollama',
+  ]);
 });
 
 test('user file overrides merge deeply and keep the rest', () => {
@@ -108,11 +117,25 @@ for (const [name, userFile, message] of [
   ['a non-string classifier model', { classifiers: { jev: { model: 5 } } }, /classifiers\.jev\.model/],
   ['a key option that is not a plugin option', { classifiers: { jev: { keyOption: 'house_key' } } }, /keyOption/],
   ['an unknown classifier API', { classifiers: { jev: { api: 'anthropic' } } }, /classifiers\.jev\.api/],
-  ['a key header with a space', { classifiers: { jev: { keyHeader: 'x bad' } } }, /classifiers\.jev\.keyHeader/],
-  ['a key header with a line break', { classifiers: { jev: { keyHeader: 'a\r\nb' } } }, /classifiers\.jev\.keyHeader/],
+  [
+    'a key header, which is not a field',
+    { classifiers: { jev: { keyHeader: 'x-key' } } },
+    /classifiers\.jev\.keyHeader/,
+  ],
+  [
+    'the gateway URL inside a path',
+    { classifiers: { jev: { endpoint: 'https://x/{gateway_url}/v1' } } },
+    /classifiers\.jev.*gateway_url/,
+  ],
+  ['the gateway URL in a model', { classifiers: { jev: { model: '{gateway_url}' } } }, /classifiers\.jev.*gateway_url/],
+  [
+    'a model setting that is not a plugin option',
+    { classifiers: { jev: { model: '{region}' } } },
+    /classifiers\.jev\.model/,
+  ],
+  ['a stray brace in a model', { classifiers: { jev: { model: 'jev}' } } }, /classifiers\.jev\.model/],
   ['a reserved key header', { classifiers: { jev: { keyHeader: 'Cookie' } } }, /classifiers\.jev\.keyHeader/],
   ['a non-string key header', { classifiers: { jev: { keyHeader: 5 } } }, /classifiers\.jev\.keyHeader/],
-  ['a key header without a key', { classifiers: { ollama: { keyHeader: 'x-key' } } }, /classifiers\.ollama\.keyHeader/],
   [
     'an endpoint setting that is not a plugin option',
     { classifiers: { jev: { endpoint: 'https://x/{region}/decide' } } },
@@ -393,26 +416,60 @@ test('classifiers read exactly the options plugin.json declares', () => {
   assert.deepEqual(Object.keys(manifest.userConfig).sort(), Object.keys(CLASSIFIER_OPTIONS).sort());
 });
 
-test('a gateway entry reads the gateway key and may name the header it travels in', () => {
+test('a router.json entry can use the gateway settings, and a fixed URL with the gateway key', () => {
   const config = loadConfig({
     userFile: {
-      classifier: 'litellm',
+      classifier: 'litellm-luna',
       classifiers: {
-        litellm: {
-          label: 'Jev via LiteLLM',
+        'litellm-luna': {
+          label: 'Luna via LiteLLM',
+          api: 'openai-decisions',
+          endpoint: '{gateway_url}/v1/decisions',
+          model: '{gateway_model}',
+          keyOption: 'gateway_api_key',
+          timeoutMs: 3500,
+        },
+        fixed: {
+          label: 'Fixed',
           endpoint: 'https://litellm.example.internal/v1/systemone',
           model: 'jev',
           keyOption: 'gateway_api_key',
-          keyHeader: 'X-Litellm-Key',
           timeoutMs: 2500,
         },
       },
     },
   });
-  assert.equal(config.classifiers.litellm.api, 'system-one');
-  assert.equal(config.classifiers.litellm.model, 'jev');
-  assert.equal(config.classifiers.litellm.keyHeader, 'X-Litellm-Key');
-  assert.equal(config.classifiers.jev.keyHeader, undefined);
+  assert.equal(config.classifiers['litellm-luna'].api, 'openai-decisions');
+  assert.equal(config.classifiers.fixed.api, 'system-one');
+  assert.deepEqual(config.classifiers.gateway, {
+    label: 'Gateway',
+    api: 'system-one',
+    endpoint: '{gateway_url}/v1/systemone',
+    model: '{gateway_model}',
+    keyOption: 'gateway_api_key',
+    timeoutMs: 3000,
+  });
+});
+
+test('a gateway base URL is https or local http, without user info, query or fragment', () => {
+  for (const [value, expected] of [
+    ['https://gw.example', 'https://gw.example'],
+    ['  https://gw.example/  ', 'https://gw.example'],
+    ['https://gw.example/v1', 'https://gw.example'],
+    ['https://gw.example:8443/llm//', 'https://gw.example:8443/llm'],
+    ['http://localhost:4000', 'http://localhost:4000'],
+    ['http://[::1]:4000/v1/', 'http://[::1]:4000'],
+    ['http://gw.example', null],
+    ['http://localhost.example', null],
+    ['ftp://gw.example', null],
+    ['https://u:p@gw.example', null],
+    ['https://gw.example?x=1', null],
+    ['https://gw.example#a', null],
+    ['gw.example', null],
+    ['', null],
+    [undefined, null],
+  ])
+    assert.equal(gatewayBase(value), expected, String(value));
 });
 
 test('a keyless classifier needs no key option; a user entry speaks System One unless it names an API', () => {

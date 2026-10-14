@@ -91,45 +91,28 @@ test('native Jev sends the shared contract and reads text and plain headers', as
   assert.equal(result.advice.choice, 'medium');
 });
 
-test('a key header sends the bearer key in that header and not in authorization', async () => {
+test('a filled model replaces the entry model in the request, on every request of the turn', async () => {
   const timing = clock();
-  const config = {
-    ...DEFAULTS,
-    classifiers: { ...DEFAULTS.classifiers, jev: { ...DEFAULTS.classifiers.jev, keyHeader: 'X-Litellm-Key' } },
-  };
-  const gateway = new ClassifierClient({ now: timing.now });
-  const result = await gateway.ask({
-    ...input(timing, async (_url, init) => {
-      assert.equal(init.headers['x-litellm-key'], 'Bearer synthetic-test-key');
-      assert.equal(Object.hasOwn(init.headers, 'authorization'), false);
-      return ok();
-    }),
-    config,
-  });
-  assert.equal(result.error, null);
-});
-
-test('a keyed Ollama-protocol gateway sends the key header on the activity request too', async () => {
-  const timing = clock();
-  const headers = [];
+  const bodies = [];
   const config = loadConfig({
-    userFile: {
-      classifier: 'ollama',
-      activityRouting: 'on',
-      classifiers: { ollama: { keyOption: 'gateway_api_key', keyHeader: 'X-Litellm-Key' } },
-    },
+    userFile: { classifier: 'ollama', activityRouting: 'on', classifiers: { ollama: { model: '{gateway_model}' } } },
   });
   const client = new ClassifierClient({ now: timing.now });
   const result = await client.ask({
     ...input(timing, async (_url, init) => {
-      headers.push(init.headers);
-      return local(headers.length === 1 ? routeAnswer : activityAnswer);
+      bodies.push(JSON.parse(init.body));
+      return local(bodies.length === 1 ? routeAnswer : activityAnswer);
     }),
     config,
+    apiKey: null,
+    model: 'qwen3.5:9b',
   });
   assert.equal(result.error, null);
-  assert.equal(headers.length, 2);
-  for (const sent of headers) assert.equal(sent['x-litellm-key'], 'Bearer synthetic-test-key');
+  assert.deepEqual(
+    bodies.map((body) => body.model),
+    ['qwen3.5:9b', 'qwen3.5:9b'],
+  );
+  assert.equal(config.classifiers.ollama.model, '{gateway_model}');
 });
 
 test('the deadline is the active classifier deadline', async () => {

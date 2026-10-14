@@ -4,8 +4,8 @@
 
 ### Added
 
-- A classifier behind your own LLM gateway, such as a LiteLLM proxy. Add an entry in `router.json` with the gateway's `/v1/systemone` or `/v1/decisions` URL and its model name, and save the gateway key in the new `gateway_api_key` plugin option (or `LITELLM_API_KEY`). See [LLM gateway](docs/configuration.md#llm-gateway-litellm).
-- `keyHeader` on a classifier entry: the header the bearer key travels in, for a gateway that reads it from its own header, such as `X-Litellm-Key`.
+- **Gateway** (`gateway`), a built-in classifier that asks your own LLM gateway, such as a LiteLLM proxy, on `/v1/systemone`. Save three new plugin options with `/plugin configure router`: `gateway_url` (https, or http on localhost), `gateway_model` (the model name the gateway serves, sent as written) and `gateway_api_key` (or `LITELLM_API_BASE` and `LITELLM_API_KEY`), then select its row on the Classifier tab. See [LLM gateway](docs/configuration.md#llm-gateway-litellm).
+- A `router.json` classifier entry can use `{gateway_url}` at the start of its `endpoint` and a `{name}` setting in its `model`, for example the gateway's `/v1/decisions` route.
 
 ## 1.14.0 (2026-10-14)
 
